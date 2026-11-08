@@ -39,7 +39,11 @@ def run(message, attack="none", defense=False):
             f"fingerprint {alice_fp}，result={'passed' if bob_ok else 'failed'}",
         )
         if not (alice_ok and bob_ok):
-            L("Alice/Bob", "Terminate session", "身份验证failed，未建立共享密钥")
+            L(
+                "Alice/Bob",
+                "Terminate session",
+                "Identity verification failed; no shared key established",
+            )
             return {
                 "success": False,
                 "message": "Connection blocked by defense",
@@ -58,7 +62,7 @@ def run(message, attack="none", defense=False):
         L("Evil", "Tamper message", f"ciphertext→{c}")
     elif attack == "key_replace":
         plain = decrypt(c, el, n)
-        c = crypt(plain + " [已窃听]", er, n)
+        c = crypt(plain + " [intercepted]", er, n)
         L("Evil", "Decrypt and forward", f"Intercepted plaintext:{plain}")
     tr.append({"from": "Evil", "to": "Bob", "data": c})
     valid = hmac.compare_digest(mac, tag(c, bsh, n))
@@ -67,10 +71,10 @@ def run(message, attack="none", defense=False):
     except (ValueError, UnicodeDecodeError):
         r = "[Unable to decrypt]"
     if defense and not valid:
-        L("Bob", "Reject message", "完整性校验failed")
+        L("Bob", "Reject message", "Integrity check failed")
         r = "[Rejected]"
     else:
-        L("Bob", "Receive", f"明文：{r}")
+        L("Bob", "Receive", f"plaintext:{r}")
     return {
         "success": True,
         "message": "Communication complete",
