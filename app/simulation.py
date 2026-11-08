@@ -12,8 +12,10 @@ def run(message, attack="none", defense=False):
     bp, BP = dh_keypair()
     L("Alice", "Generate keys", f"A={AP}")
     L("Bob", "Generate keys", f"B={BP}")
-    L("Alice", "Send public key", f"A={AP}")
-    L("Bob", "Send public key", f"B={BP}")
+    L("Alice", "Send public key", f"A={AP} to Evil")
+    L("Evil", "Forward public key", f"A={AP} to Bob")
+    L("Bob", "Send public key", f"B={BP} to Evil")
+    L("Evil", "Forward public key", f"B={BP} to Alice")
     trusted_bob = hashlib.sha256(str(BP).encode()).hexdigest()[:16]
     trusted_alice = hashlib.sha256(str(AP).encode()).hexdigest()[:16]
     if attack == "key_replace":
