@@ -33,6 +33,21 @@ def test_tampering_fails_integrity_and_is_rejected_by_defense():
     assert blocked["integrity"] is False
 
 
+def test_replay_is_accepted_without_defense_and_rejected_with_nonce_check():
+    attack = run("hello", "replay", False)
+    assert attack["replay_detected"] is True
+    assert len(attack["transcript"]) == 3
+    assert attack["received"] == "hello"
+    assert attack["integrity"] is True
+    assert sum(log["action"] == "Receive" for log in attack["logs"]) == 2
+
+    blocked = run("hello", "replay", True)
+    assert blocked["replay_detected"] is True
+    assert blocked["received"] == "[Replay rejected]"
+    assert blocked["integrity"] is True
+    assert any("Replay detected" in log["detail"] for log in blocked["logs"])
+
+
 def test_unknown_attack_is_rejected():
     with pytest.raises(ValueError):
         run("hello", "unknown", False)

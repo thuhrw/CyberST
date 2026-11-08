@@ -17,7 +17,7 @@ _BOB_PRIVATE, _BOB_PUBLIC = dh_keypair()
 
 
 def run(message, attack="none", defense=False):
-    if attack not in {"none", "key_replace", "tamper"}:
+    if attack not in {"none", "key_replace", "tamper", "replay"}:
         raise ValueError("unknown attack scenario")
     logs = []
     L = lambda a, x, d: logs.append({"actor": a, "action": x, "detail": d})
@@ -90,24 +90,44 @@ def run(message, attack="none", defense=False):
         L("Evil", "Decrypt and forward", f"Intercepted plaintext:{plain}")
     else:
         L("Evil", "Forward message", "Forward ciphertext without changes")
+    seen_nonces = set()
+
+    def deliver(current_packet):
+        nonce = current_packet["nonce"]
+        if defense and nonce in seen_nonces:
+            L("Bob", "Reject message", "Replay detected: nonce already used")
+            return "[Replay rejected]", True
+        seen_nonces.add(nonce)
+        valid = constant_time_equal(
+            current_packet["tag"], tag(
+                current_packet["ciphertext"], bsh, nonce
+            )
+        )
+        try:
+            received = decrypt(current_packet["ciphertext"], bsh, nonce)
+        except (ValueError, UnicodeDecodeError):
+            received = "[Unable to decrypt]"
+        if defense and not valid:
+            L("Bob", "Reject message", "Integrity check failed")
+            received = "[Rejected]"
+        else:
+            L("Bob", "Receive", f"plaintext:{received}")
+        return received, valid
+
     tr.append({"from": "Evil", "to": "Bob", "data": dict(packet)})
-    valid = constant_time_equal(
-        packet["tag"], tag(packet["ciphertext"], bsh, packet["nonce"])
-    )
-    try:
-        r = decrypt(packet["ciphertext"], bsh, packet["nonce"])
-    except (ValueError, UnicodeDecodeError):
-        r = "[Unable to decrypt]"
-    if defense and not valid:
-        L("Bob", "Reject message", "Integrity check failed")
-        r = "[Rejected]"
-    else:
-        L("Bob", "Receive", f"plaintext:{r}")
+    r, valid = deliver(packet)
+    replay_detected = False
+    if attack == "replay":
+        replay_detected = True
+        L("Evil", "Replay message", "Resend the captured packet without changes")
+        tr.append({"from": "Evil", "to": "Bob", "data": dict(packet)})
+        r, valid = deliver(packet)
     return {
         "success": True,
-        "message": "Communication complete",
+        "message": "Replay detected and rejected" if replay_detected and defense else "Communication complete",
         "logs": logs,
         "transcript": tr,
         "received": r,
         "integrity": valid,
+        "replay_detected": replay_detected,
     }

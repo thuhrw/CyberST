@@ -10,7 +10,7 @@ app = FastAPI()
 
 class Req(BaseModel):
     message: str = "Meet at 10:00"
-    attack: Literal["none", "key_replace", "tamper"] = "none"
+    attack: Literal["none", "key_replace", "tamper", "replay"] = "none"
     defense: StrictBool = False
 
 
