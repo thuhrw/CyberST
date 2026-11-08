@@ -47,6 +47,7 @@ def test_stream_cipher_matches_independent_reference():
     text = "你好, Alice"
     shared = 12345
     nonce = "abc"
+    assert crypt(text, shared, nonce) == "3828e9de1fe6e0d5193a0d45f8"
     key = hashlib.sha256(f"mitm-lab:{shared}".encode()).digest()
     expected = bytearray()
     for i, byte in enumerate(text.encode()):
@@ -54,6 +55,16 @@ def test_stream_cipher_matches_independent_reference():
         expected.append(byte ^ stream[i % 32])
     assert crypt(text, shared, nonce) == expected.hex()
     assert decrypt(expected.hex(), shared, nonce) == text
+
+
+def test_wrong_key_does_not_recover_plaintext():
+    text = "hello"
+    ciphertext = crypt(text, 12345, "abc")
+    try:
+        recovered = decrypt(ciphertext, 54321, "abc")
+    except UnicodeDecodeError:
+        return
+    assert recovered != text
 
 
 def test_tag_matches_independent_hmac_reference_and_detects_changes():
