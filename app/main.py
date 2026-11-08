@@ -1,6 +1,7 @@
 from fastapi import FastAPI
 from fastapi.responses import FileResponse
-from pydantic import BaseModel
+from pydantic import BaseModel, StrictBool
+from typing import Literal
 
 from .simulation import run
 
@@ -9,8 +10,8 @@ app = FastAPI()
 
 class Req(BaseModel):
     message: str = "Meet at 10:00"
-    attack: str = "none"
-    defense: bool = False
+    attack: Literal["none", "key_replace", "tamper"] = "none"
+    defense: StrictBool = False
 
 
 @app.get("/")

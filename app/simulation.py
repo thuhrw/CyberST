@@ -1,19 +1,32 @@
-import hashlib
-import hmac
 import secrets
 
-from .core import *
+from .core import (
+    constant_time_equal,
+    crypt,
+    decrypt,
+    dh_keypair,
+    dh_shared,
+    sha256,
+    tag,
+)
+
+# The lab keeps an out-of-band trust store for the lifetime of the process.
+# In a deployed protocol these fingerprints would be provisioned externally.
+_ALICE_PRIVATE, _ALICE_PUBLIC = dh_keypair()
+_BOB_PRIVATE, _BOB_PUBLIC = dh_keypair()
 
 
 def run(message, attack="none", defense=False):
+    if attack not in {"none", "key_replace", "tamper"}:
+        raise ValueError("unknown attack scenario")
     logs = []
     L = lambda a, x, d: logs.append({"actor": a, "action": x, "detail": d})
-    ap, AP = dh_keypair()
-    bp, BP = dh_keypair()
+    ap, AP = _ALICE_PRIVATE, _ALICE_PUBLIC
+    bp, BP = _BOB_PRIVATE, _BOB_PUBLIC
     L("Alice", "Generate keys", f"A={AP}")
     L("Bob", "Generate keys", f"B={BP}")
-    trusted_bob = hashlib.sha256(str(BP).encode()).hexdigest()[:16]
-    trusted_alice = hashlib.sha256(str(AP).encode()).hexdigest()[:16]
+    trusted_bob = sha256(str(BP).encode()).hex()
+    trusted_alice = sha256(str(AP).encode()).hex()
     L("Alice", "Send public key", f"A={AP} to Evil")
     if attack == "key_replace":
         e1, E1 = dh_keypair()
@@ -31,19 +44,19 @@ def run(message, attack="none", defense=False):
         received_bob_key, received_alice_key = BP, AP
         el = er = None
     if defense:
-        bob_fp = hashlib.sha256(str(received_bob_key).encode()).hexdigest()[:16]
-        alice_fp = hashlib.sha256(str(received_alice_key).encode()).hexdigest()[:16]
+        bob_fp = sha256(str(received_bob_key).encode()).hex()
+        alice_fp = sha256(str(received_alice_key).encode()).hex()
         alice_ok = bob_fp == trusted_bob
         bob_ok = alice_fp == trusted_alice
         L(
             "Alice",
             "Verify Bob",
-            f"fingerprint {bob_fp}，result={'passed' if alice_ok else 'failed'}",
+            f"fingerprint {bob_fp[:16]}，result={'passed' if alice_ok else 'failed'}",
         )
         L(
             "Bob",
             "Verify Alice",
-            f"fingerprint {alice_fp}，result={'passed' if bob_ok else 'failed'}",
+            f"fingerprint {alice_fp[:16]}，result={'passed' if bob_ok else 'failed'}",
         )
         if not (alice_ok and bob_ok):
             L(
@@ -62,22 +75,27 @@ def run(message, attack="none", defense=False):
     n = secrets.token_hex(6)
     c = crypt(message, ash, n)
     mac = tag(c, ash, n)
-    L("Alice", "Send", f"ciphertext {c}，tag {mac}")
-    tr = [{"from": "Alice", "to": "Evil", "data": c}]
+    packet = {"ciphertext": c, "nonce": n, "tag": mac}
+    L("Alice", "Send", f"ciphertext {c}，nonce {n}，tag {mac}")
+    tr = [{"from": "Alice", "to": "Evil", "data": dict(packet)}]
     if attack == "tamper":
-        c = ("00" if c[:2] != "00" else "ff") + c[2:]
-        L("Evil", "Tamper message", f"ciphertext→{c}")
+        packet["ciphertext"] = (
+            "00" if packet["ciphertext"][:2] != "00" else "ff"
+        ) + packet["ciphertext"][2:]
+        L("Evil", "Tamper message", f"ciphertext→{packet['ciphertext']}")
     elif attack == "key_replace":
-        plain = decrypt(c, el, n)
-        c = crypt(plain + " [intercepted]", er, n)
-        mac = tag(c, bsh, n)
+        plain = decrypt(packet["ciphertext"], el, packet["nonce"])
+        packet["ciphertext"] = crypt(plain + " [intercepted]", er, packet["nonce"])
+        packet["tag"] = tag(packet["ciphertext"], er, packet["nonce"])
         L("Evil", "Decrypt and forward", f"Intercepted plaintext:{plain}")
     else:
         L("Evil", "Forward message", "Forward ciphertext without changes")
-    tr.append({"from": "Evil", "to": "Bob", "data": c})
-    valid = hmac.compare_digest(mac, tag(c, bsh, n))
+    tr.append({"from": "Evil", "to": "Bob", "data": dict(packet)})
+    valid = constant_time_equal(
+        packet["tag"], tag(packet["ciphertext"], bsh, packet["nonce"])
+    )
     try:
-        r = decrypt(c, bsh, n)
+        r = decrypt(packet["ciphertext"], bsh, packet["nonce"])
     except (ValueError, UnicodeDecodeError):
         r = "[Unable to decrypt]"
     if defense and not valid:
