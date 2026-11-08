@@ -70,6 +70,7 @@ def run(message, attack="none", defense=False):
     elif attack == "key_replace":
         plain = decrypt(c, el, n)
         c = crypt(plain + " [intercepted]", er, n)
+        mac = tag(c, bsh, n)
         L("Evil", "Decrypt and forward", f"Intercepted plaintext:{plain}")
     else:
         L("Evil", "Forward message", "Forward ciphertext without changes")
