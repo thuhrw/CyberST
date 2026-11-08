@@ -1,3 +1,4 @@
+import hashlib
 import hmac
 import secrets
 
@@ -11,26 +12,34 @@ def run(message, attack="none", defense=False):
     bp, BP = dh_keypair()
     L("Alice", "生成密钥", f"A={AP}")
     L("Bob", "生成密钥", f"B={BP}")
+    trusted_bob = hashlib.sha256(str(BP).encode()).hexdigest()[:16]
+    trusted_alice = hashlib.sha256(str(AP).encode()).hexdigest()[:16]
     if attack == "key_replace":
         e1, E1 = dh_keypair()
         e2, E2 = dh_keypair()
         L("Evil", "替换密钥", f"A→{E1}, B→{E2}")
-        if defense:
-            L("Alice/Bob", "验证失败", "公开值指纹不匹配，拒绝会话")
+        received_bob_key, received_alice_key = E1, E2
+        el, er = dh_shared(e1, AP), dh_shared(e2, BP)
+    else:
+        received_bob_key, received_alice_key = BP, AP
+        el = er = None
+    if defense:
+        bob_fp = hashlib.sha256(str(received_bob_key).encode()).hexdigest()[:16]
+        alice_fp = hashlib.sha256(str(received_alice_key).encode()).hexdigest()[:16]
+        alice_ok = bob_fp == trusted_bob
+        bob_ok = alice_fp == trusted_alice
+        L("Alice", "验证 Bob", f"指纹 {bob_fp}，结果={'通过' if alice_ok else '失败'}")
+        L("Bob", "验证 Alice", f"指纹 {alice_fp}，结果={'通过' if bob_ok else '失败'}")
+        if not (alice_ok and bob_ok):
+            L("Alice/Bob", "终止会话", "身份验证失败，未建立共享密钥")
             return {
                 "success": False,
                 "message": "连接被防御阻断",
                 "logs": logs,
                 "transcript": [],
             }
-        ash = dh_shared(ap, E1)
-        bsh = dh_shared(bp, E2)
-        el = dh_shared(e1, AP)
-        er = dh_shared(e2, BP)
-    else:
-        ash = dh_shared(ap, BP)
-        bsh = dh_shared(bp, AP)
-        el = er = None
+    ash = dh_shared(ap, received_bob_key)
+    bsh = dh_shared(bp, received_alice_key)
     n = secrets.token_hex(6)
     c = crypt(message, ash, n)
     mac = tag(c, ash, n)
