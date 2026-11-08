@@ -12,19 +12,22 @@ def run(message, attack="none", defense=False):
     bp, BP = dh_keypair()
     L("Alice", "Generate keys", f"A={AP}")
     L("Bob", "Generate keys", f"B={BP}")
-    L("Alice", "Send public key", f"A={AP} to Evil")
-    L("Evil", "Forward public key", f"A={AP} to Bob")
-    L("Bob", "Send public key", f"B={BP} to Evil")
-    L("Evil", "Forward public key", f"B={BP} to Alice")
     trusted_bob = hashlib.sha256(str(BP).encode()).hexdigest()[:16]
     trusted_alice = hashlib.sha256(str(AP).encode()).hexdigest()[:16]
+    L("Alice", "Send public key", f"A={AP} to Evil")
     if attack == "key_replace":
         e1, E1 = dh_keypair()
         e2, E2 = dh_keypair()
-        L("Evil", "Replace keys", f"A→{E1}, B→{E2}")
-        received_bob_key, received_alice_key = E1, E2
+        L("Evil", "Replace Alice key", f"Forward E1={E1} to Bob")
+        received_bob_key = E1
+        L("Bob", "Send public key", f"B={BP} to Evil")
+        L("Evil", "Replace Bob key", f"Forward E2={E2} to Alice")
+        received_alice_key = E2
         el, er = dh_shared(e1, AP), dh_shared(e2, BP)
     else:
+        L("Evil", "Forward public key", f"A={AP} to Bob")
+        L("Bob", "Send public key", f"B={BP} to Evil")
+        L("Evil", "Forward public key", f"B={BP} to Alice")
         received_bob_key, received_alice_key = BP, AP
         el = er = None
     if defense:
