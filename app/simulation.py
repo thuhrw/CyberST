@@ -9,7 +9,7 @@ from .core import (
     sha256,
     tag,
 )
-from .replay import ReplayWindow, SequenceCounter
+from .replay import NonceReplayCache
 
 # The lab keeps an out-of-band trust store for the lifetime of the process.
 # In a deployed protocol these fingerprints would be provisioned externally.
@@ -73,21 +73,15 @@ def run(message, attack="none", defense=False):
             }
     ash = dh_shared(ap, received_bob_key)
     bsh = dh_shared(bp, received_alice_key)
-    sender_sequence = SequenceCounter()
-    receiver_window = ReplayWindow(size=64)
-    session_id = secrets.token_hex(16)
-    sequence = sender_sequence.next()
     n = secrets.token_hex(12)
     c = crypt(message, ash, n)
-    mac = tag(c, ash, n, sequence, session_id)
+    mac = tag(c, ash, n)
     packet = {
-        "session_id": session_id,
-        "sequence": sequence,
         "ciphertext": c,
         "nonce": n,
         "tag": mac,
     }
-    L("Alice", "Send", f"sequence {sequence}，ciphertext {c}，nonce {n}，tag {mac}")
+    L("Alice", "Send", f"ciphertext {c}，nonce {n}，tag {mac}")
     tr = [{"from": "Alice", "to": "Evil", "data": dict(packet)}]
     if attack == "tamper":
         packet["ciphertext"] = (
@@ -97,26 +91,23 @@ def run(message, attack="none", defense=False):
     elif attack == "key_replace":
         plain = decrypt(packet["ciphertext"], el, packet["nonce"])
         packet["ciphertext"] = crypt(plain + " [intercepted]", er, packet["nonce"])
-        packet["tag"] = tag(
-            packet["ciphertext"], er, packet["nonce"], packet["sequence"], session_id
-        )
+        packet["tag"] = tag(packet["ciphertext"], er, packet["nonce"])
         L("Evil", "Decrypt and forward", f"Intercepted plaintext:{plain}")
     else:
         L("Evil", "Forward message", "Forward ciphertext without changes")
+    seen_nonces = NonceReplayCache()
+
     def deliver(current_packet):
         nonce = current_packet["nonce"]
         valid = constant_time_equal(
             current_packet["tag"],
-            tag(
-                current_packet["ciphertext"], bsh, nonce,
-                current_packet["sequence"], session_id,
-            ),
+            tag(current_packet["ciphertext"], bsh, nonce),
         )
         if defense and not valid:
             L("Bob", "Reject message", "Integrity check failed")
             return "[Rejected]", False
-        if defense and not receiver_window.accept(current_packet["sequence"]):
-            L("Bob", "Reject message", "Replay detected: sequence already used or too old")
+        if defense and not seen_nonces.accept(nonce):
+            L("Bob", "Reject message", "Replay detected: nonce already used")
             return "[Replay rejected]", True
         try:
             received = decrypt(current_packet["ciphertext"], bsh, nonce)

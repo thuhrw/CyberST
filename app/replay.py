@@ -1,53 +1,17 @@
-"""Sequence numbers and the sliding anti-replay window used by the lab."""
+"""Nonce tracking used by the lab's anti-replay defense."""
 
-from dataclasses import dataclass
-
-
-MAX_SEQUENCE = (1 << 32) - 1
+from dataclasses import dataclass, field
 
 
 @dataclass
-class SequenceCounter:
-    """Monotonic sender sequence number for one security association."""
+class NonceReplayCache:
+    """Remember every authenticated nonce received in one session."""
 
-    value: int = 0
+    seen: set[str] = field(default_factory=set)
 
-    def next(self) -> int:
-        if self.value >= MAX_SEQUENCE:
-            raise OverflowError("security association sequence space exhausted")
-        self.value += 1
-        return self.value
-
-
-@dataclass
-class ReplayWindow:
-    """A fixed-size bitmap window, with the newest sequence at bit zero."""
-
-    size: int = 64
-    highest: int = 0
-    bitmap: int = 0
-
-    def __post_init__(self) -> None:
-        if self.size <= 0:
-            raise ValueError("window size must be positive")
-        self._mask = (1 << self.size) - 1
-
-    def accept(self, sequence: int) -> bool:
-        """Record an authenticated sequence and return whether it is new."""
-        if not 1 <= sequence <= MAX_SEQUENCE:
+    def accept(self, nonce: str) -> bool:
+        """Record a new nonce and return False for a duplicate."""
+        if nonce in self.seen:
             return False
-        if self.highest == 0:
-            self.highest = sequence
-            self.bitmap = 1
-            return True
-        if sequence > self.highest:
-            shift = sequence - self.highest
-            self.bitmap = 1 if shift >= self.size else ((self.bitmap << shift) | 1) & self._mask
-            self.highest = sequence
-            return True
-
-        offset = self.highest - sequence
-        if offset >= self.size or self.bitmap & (1 << offset):
-            return False
-        self.bitmap |= 1 << offset
+        self.seen.add(nonce)
         return True

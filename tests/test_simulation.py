@@ -1,6 +1,6 @@
 import pytest
 
-from app.replay import MAX_SEQUENCE, ReplayWindow, SequenceCounter
+from app.replay import NonceReplayCache
 from app.simulation import run
 
 
@@ -10,8 +10,7 @@ def test_normal_communication_preserves_message_and_transmits_envelope():
     assert result["received"] == "Meet at 10:00"
     assert result["integrity"] is True
     packet = result["transcript"][1]["data"]
-    assert set(packet) == {"session_id", "sequence", "ciphertext", "nonce", "tag"}
-    assert packet["sequence"] == 1
+    assert set(packet) == {"ciphertext", "nonce", "tag"}
 
 
 def test_key_replacement_is_visible_without_defense_and_blocked_with_defense():
@@ -35,7 +34,7 @@ def test_tampering_fails_integrity_and_is_rejected_by_defense():
     assert blocked["integrity"] is False
 
 
-def test_replay_is_accepted_without_defense_and_rejected_with_sequence_window():
+def test_replay_is_accepted_without_defense_and_rejected_with_nonce_cache():
     attack = run("hello", "replay", False)
     assert attack["replay_detected"] is True
     assert len(attack["transcript"]) == 3
@@ -50,20 +49,12 @@ def test_replay_is_accepted_without_defense_and_rejected_with_sequence_window():
     assert any("Replay detected" in log["detail"] for log in blocked["logs"])
 
 
-def test_sliding_window_accepts_new_out_of_order_packets_and_rejects_old_duplicates():
-    window = ReplayWindow(size=4)
-    assert [window.accept(sequence) for sequence in [1, 3, 2, 4]] == [True, True, True, True]
-    assert window.accept(3) is False
-    assert window.accept(1) is False
-    assert window.accept(5) is True
-    assert window.accept(2) is False
-
-
-def test_sequence_counter_stops_before_wraparound():
-    counter = SequenceCounter(MAX_SEQUENCE - 1)
-    assert counter.next() == MAX_SEQUENCE
-    with pytest.raises(OverflowError):
-        counter.next()
+def test_nonce_cache_remembers_all_seen_nonces():
+    cache = NonceReplayCache()
+    assert cache.accept("nonce-a") is True
+    assert cache.accept("nonce-b") is True
+    assert cache.accept("nonce-a") is False
+    assert cache.seen == {"nonce-a", "nonce-b"}
 
 
 def test_unknown_attack_is_rejected():
