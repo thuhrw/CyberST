@@ -127,8 +127,17 @@ def decrypt(ciphertext: str, shared: int, nonce: str) -> str:
     return plain.decode()
 
 
-def tag(ciphertext: str, shared: int, nonce: str) -> str:
-    return hmac_sha256(_k(shared), f"{nonce}:{ciphertext}".encode()).hex()
+def tag(
+    ciphertext: str,
+    shared: int,
+    nonce: str,
+    sequence: int = 0,
+    session_id: str = "",
+) -> str:
+    """Authenticate all fields that affect freshness and decryption."""
+    return hmac_sha256(
+        _k(shared), f"{session_id}:{sequence}:{nonce}:{ciphertext}".encode()
+    ).hex()
 
 
 def constant_time_equal(left: str, right: str) -> bool:

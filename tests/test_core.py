@@ -73,6 +73,8 @@ def test_wrong_key_does_not_recover_plaintext():
 def test_tag_matches_independent_hmac_reference_and_detects_changes():
     ciphertext = crypt("hello", 12345, "abc")
     key = hashlib.sha256(f"mitm-lab:{12345}".encode()).digest()
-    expected = hmac.new(key, f"abc:{ciphertext}".encode(), hashlib.sha256).hexdigest()
-    assert tag(ciphertext, 12345, "abc") == expected
-    assert tag(ciphertext[:-2] + "00", 12345, "abc") != expected
+    expected = hmac.new(key, f"sa-1:7:abc:{ciphertext}".encode(), hashlib.sha256).hexdigest()
+    assert tag(ciphertext, 12345, "abc", 7, "sa-1") == expected
+    assert tag(ciphertext[:-2] + "00", 12345, "abc", 7, "sa-1") != expected
+    assert tag(ciphertext, 12345, "abc", 8, "sa-1") != expected
+    assert tag(ciphertext, 12345, "abc", 7, "sa-2") != expected
