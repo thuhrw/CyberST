@@ -1,1 +1,236 @@
-<!doctype html><meta charset=utf-8><title>MITM Lab</title><style>body{font-family:system-ui;background:#0f172a;color:#e2e8f0;max-width:1400px;width:calc(100% - 40px);margin:30px auto}section{background:#1e293b;padding:20px;border-radius:12px;margin:15px 0}input,select,button{padding:10px;margin:5px;background:#334155;color:white;border:1px solid #64748b;border-radius:6px}button{background:#06b6d4;color:#042f2e;font-weight:bold}.log{padding:12px 14px;margin:8px 0;border-radius:9px;background:#273449;border-left:4px solid #64748b;line-height:1.5;overflow-wrap:anywhere;word-break:break-word}.log b{margin-right:8px}.Alice{border-left-color:#4ade80}.Bob{border-left-color:#fb7185}.Evil{border-left-color:#facc15}.Alice{color:#86efac}.Bob{color:#fda4af}.Evil{color:#fcd34d}.network{--node-center:60px;display:grid;grid-template-columns:120px minmax(0,1fr) 120px minmax(0,1fr) 120px;gap:20px;align-items:center;margin:25px 0;position:relative}.network #alice{grid-column:1}.network #link1{grid-column:2}.network #evil{grid-column:3}.network #link2{grid-column:4}.network #bob{grid-column:5}.node{width:120px;box-sizing:border-box;text-align:center;padding:18px 8px;border-radius:14px;background:#334155;border:2px solid #64748b;transition:.35s}.node.active{border-color:#22d3ee;box-shadow:0 0 24px #22d3ee;transform:scale(1.08)}.node .icon{font-size:35px}.link{height:4px;width:100%;background:#64748b;position:relative}.packet{position:absolute;width:14px;height:14px;border-radius:50%;background:#facc15;top:50%;transform:translate(-50%,-50%);z-index:3;opacity:0}.packet.animate{opacity:1}.packet.ae{animation:toEvil .8s ease-in-out}.packet.eb{animation:toBob .8s ease-in-out}.packet.full{animation:toOther .9s ease-in-out}.packet.ba{animation:toAlice .9s ease-in-out}.packet.be{animation:toEvilReverse .8s ease-in-out}.packet.ea{animation:toAliceFromEvil .8s ease-in-out}@keyframes toEvil{0%{left:var(--node-center);opacity:1}85%{left:50%;opacity:1}100%{left:50%;opacity:0}}@keyframes toBob{0%{left:50%;opacity:1}85%{left:calc(100% - var(--node-center));opacity:1}100%{left:calc(100% - var(--node-center));opacity:0}}@keyframes toOther{0%{left:var(--node-center);opacity:1}85%{left:calc(100% - var(--node-center));opacity:1}100%{left:calc(100% - var(--node-center));opacity:0}}@keyframes toAlice{0%{left:calc(100% - var(--node-center));opacity:1}85%{left:var(--node-center);opacity:1}100%{left:var(--node-center);opacity:0}}@keyframes toEvilReverse{0%{left:calc(100% - var(--node-center));opacity:1}85%{left:50%;opacity:1}100%{left:50%;opacity:0}}@keyframes toAliceFromEvil{0%{left:50%;opacity:1}85%{left:var(--node-center);opacity:1}100%{left:var(--node-center);opacity:0}}@media(max-width:700px){.network{--node-center:40px;grid-template-columns:80px minmax(0,1fr) 80px minmax(0,1fr) 80px;gap:8px}.node{width:80px;padding:12px 4px}.node .icon{font-size:26px}}</style><h1>🔐 Alice · Bob · Evil MITM Lab</h1><section><input id=m value='Meet at 10:00'><select id=a><option value=none>Normal communication</option><option value=key_replace>Key replacement (eavesdropping)</option><option value=tamper>Message tampering</option><option value=replay>Replay attack</option></select><label><input type=checkbox id=d>Enable defense</label><button onclick=go()>Run experiment</button><button id=next onclick=step() disabled>Next step</button></section><section><div class=network><div id=alice class=node><div class=icon>👩‍💻</div><b>Alice</b></div><div id=link1 class=link></div><div id=evil class=node><div class=icon>🕵️</div><b>Evil</b></div><div id=link2 class=link></div><i id=packet class=packet></i><div id=bob class=node><div class=icon>👨‍💻</div><b>Bob</b></div></div><div id=o>Select a scenario</div></section><script>let x,i=0;const esc=s=>String(s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));packet.addEventListener('animationend',()=>{packet.style.opacity='0'});async function go(){x=await fetch('/api/simulate',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({message:m.value,attack:a.value,defense:d.checked})}).then(r=>r.json());i=0;next.disabled=!x.logs.length;render()}function step(){if(i<x.logs.length)i++;render()}function render(){document.querySelectorAll('.node').forEach(n=>n.classList.remove('active'));document.querySelectorAll('.link').forEach(n=>n.classList.remove('animate'));packet.className='packet';packet.style.opacity='0';if(i>0){let actor=x.logs[i-1].actor;if(actor.includes('Alice'))alice.classList.add('active');if(actor.includes('Evil'))evil.classList.add('active');if(actor.includes('Bob'))bob.classList.add('active');let action=x.logs[i-1].action;if(actor==='Alice' && action.includes('Send')) packet.classList.add('animate','ae');if(actor==='Bob' && action.includes('Send')) packet.classList.add('animate','be');if(actor==='Evil' && action.includes('Replace')) packet.classList.add('animate', action.includes('Bob key') ? 'ea' : 'eb');if(actor==='Evil' && (action.includes('Forward') || action.includes('Replay'))) packet.classList.add('animate',x.logs[i-1].detail.includes('Alice')?'ea':'eb');if(actor==='Evil' && action.includes('Tamper')) packet.classList.add('animate','eb');}let shown=x.logs.slice(0,i);o.innerHTML='<h2>'+esc(x.message)+'</h2><p>Step '+i+' / '+x.logs.length+'</p>'+shown.map(v=>`<div class="log ${esc(v.actor)}"><b>${esc(v.actor)}</b> · ${esc(v.action)}: ${esc(v.detail)}</div>`).join('');if(i===x.logs.length&&x.received)o.innerHTML+='<p><b>Received:</b> '+esc(x.received)+'　<b>Integrity:</b> '+(x.integrity===undefined?'—':x.integrity?'✅':'❌')+'</p>'}</script>
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>MITM Lab · 通信攻防实验器</title>
+  <style>
+    :root {
+      color-scheme: dark;
+      --bg: #eef7fb;
+      --panel: rgba(226, 246, 250, .4);
+      --panel-strong: #ffffff;
+      --line: rgba(55, 91, 116, .2);
+      --text: #203746;
+      --muted: #5d7180;
+      --cyan: #1685a7;
+      --cyan-deep: #11647d;
+      --green: #4ade80;
+      --yellow: #facc15;
+      --red: #fb7185;
+      --purple: #8068bd;
+      --shadow: 0 22px 70px rgba(48, 75, 92, .16);
+    }
+
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      min-width: 320px;
+      color: var(--text);
+      font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      background:
+        radial-gradient(circle at 8% 0%, rgba(142, 209, 227, .28), transparent 32rem),
+        radial-gradient(circle at 92% 10%, rgba(213, 194, 241, .2), transparent 30rem),
+        linear-gradient(rgba(255, 255, 255, .35), rgba(255, 255, 255, .5)),
+        url("/static/project-background.webp") center center / cover fixed no-repeat,
+        var(--bg);
+    }
+
+    .shell { width: min(1500px, calc(100% - 40px)); margin: 0 auto; padding: 34px 0 54px; }
+    .eyebrow { color: var(--cyan); font-size: 12px; font-weight: 800; letter-spacing: .18em; text-transform: uppercase; }
+    h1 { margin: 8px 0 8px; font-size: clamp(28px, 4vw, 46px); letter-spacing: -.04em; line-height: 1.05; }
+    .hero { display: flex; align-items: end; justify-content: space-between; gap: 24px; margin-bottom: 26px; }
+
+    .panel { border: 1px solid var(--line); border-radius: 22px; background: var(--panel); box-shadow: var(--shadow); backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px); }
+    .controls { padding: 20px; margin-bottom: 20px; }
+    .control-grid { display: grid; grid-template-columns: minmax(210px, 1.15fr) minmax(250px, 1fr) auto auto; gap: 14px; align-items: end; }
+    .field { display: grid; gap: 7px; }
+    .field label, .toggle-label { color: var(--muted); font-size: 12px; font-weight: 700; letter-spacing: .04em; }
+    input[type="text"], select { width: 100%; min-height: 44px; padding: 0 13px; border: 1px solid rgba(55, 91, 116, .25); border-radius: 11px; outline: none; color: var(--text); background: rgba(236, 250, 252, .34); font: inherit; transition: .2s; }
+    input[type="text"]:focus, select:focus { border-color: var(--cyan); box-shadow: 0 0 0 3px rgba(85, 217, 255, .13); }
+    .toggle { display: flex; align-items: center; gap: 10px; min-height: 44px; padding: 0 13px; border: 1px solid rgba(55, 91, 116, .18); border-radius: 11px; background: rgba(236, 250, 252, .34); white-space: nowrap; }
+    .toggle input { width: 18px; height: 18px; accent-color: var(--green); }
+    .toggle input:checked + span { color: var(--green); }
+    button { min-height: 44px; padding: 0 17px; border: 0; border-radius: 11px; color: #04131d; background: linear-gradient(135deg, #67e8f9, #22d3ee); font: inherit; font-weight: 800; cursor: pointer; box-shadow: 0 8px 24px rgba(34, 211, 238, .2); transition: transform .18s, filter .18s, opacity .18s; }
+    button:hover:not(:disabled) { filter: brightness(1.08); transform: translateY(-1px); }
+    button:disabled { cursor: not-allowed; opacity: .42; box-shadow: none; }
+    #next { color: var(--text); background: rgba(236, 250, 252, .34); box-shadow: none; }
+
+    .grid { display: grid; grid-template-columns: minmax(0, 1.35fr) minmax(360px, .65fr); gap: 20px; align-items: stretch; }
+    .topology, .events { min-width: 0; padding: 22px; }
+    .panel-heading { display: flex; align-items: center; justify-content: space-between; gap: 14px; margin-bottom: 18px; }
+    .panel-heading h2 { margin: 0; font-size: 17px; letter-spacing: -.01em; }
+    .panel-heading p { margin: 4px 0 0; color: var(--muted); font-size: 12px; }
+    .status { display: inline-flex; align-items: center; gap: 7px; padding: 7px 10px; border: 1px solid rgba(148, 163, 184, .2); border-radius: 999px; color: var(--muted); font-size: 12px; white-space: nowrap; }
+    .status-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--yellow); box-shadow: 0 0 12px currentColor; }
+    .status.ready .status-dot { background: var(--cyan); }
+    .status.success .status-dot { background: var(--green); }
+    .status.blocked .status-dot { background: var(--red); }
+
+    .network { --node-center: 72px; display: grid; grid-template-columns: 144px minmax(80px, 1fr) 144px minmax(80px, 1fr) 144px; gap: 18px; align-items: center; min-height: 270px; padding: 25px 12px; border: 1px solid rgba(55, 91, 116, .18); border-radius: 17px; background: linear-gradient(180deg, rgba(226, 246, 250, .34), rgba(202, 236, 241, .3)); position: relative; overflow: hidden; }
+    .network::before { content: ""; position: absolute; inset: 50% 8%; height: 1px; background: linear-gradient(90deg, transparent, rgba(85, 217, 255, .18), transparent); }
+    .node { position: relative; z-index: 2; width: 144px; padding: 18px 10px 15px; border: 1px solid rgba(55, 91, 116, .25); border-radius: 18px; text-align: center; color: var(--text); background: linear-gradient(145deg, rgba(246, 253, 254, .42), rgba(218, 242, 246, .36)); transition: .35s; }
+    .node::after { content: attr(data-role); display: block; margin-top: 6px; color: var(--muted); font-size: 10px; letter-spacing: .08em; text-transform: uppercase; }
+    .node.active { border-color: var(--cyan); box-shadow: 0 0 0 1px rgba(85, 217, 255, .25), 0 0 30px rgba(85, 217, 255, .2); transform: translateY(-3px); }
+    .node .icon { margin-bottom: 4px; font-size: 34px; filter: saturate(.9); }
+    #alice { grid-column: 1; } #link1 { grid-column: 2; } #evil { grid-column: 3; } #link2 { grid-column: 4; } #bob { grid-column: 5; }
+    .link { position: relative; z-index: 1; height: 2px; width: 100%; background: linear-gradient(90deg, rgba(22, 133, 167, .2), rgba(55, 91, 116, .45), rgba(22, 133, 167, .2)); }
+    .link.animate { background: linear-gradient(90deg, var(--cyan), rgba(148, 163, 184, .45), var(--cyan)); box-shadow: 0 0 14px rgba(85, 217, 255, .65); }
+    .packet { position: absolute; z-index: 4; width: 15px; height: 15px; border: 2px solid #fff7b2; border-radius: 50%; background: var(--yellow); box-shadow: 0 0 7px #fff, 0 0 20px var(--yellow); top: 50%; transform: translate(-50%, -50%); opacity: 0; pointer-events: none; }
+    .packet.animate { opacity: 1; }
+    .packet.ae { animation: toEvil .8s ease-in-out; } .packet.eb { animation: toBob .8s ease-in-out; } .packet.full { animation: toOther .9s ease-in-out; } .packet.ba { animation: toAlice .9s ease-in-out; } .packet.be { animation: toEvilReverse .8s ease-in-out; } .packet.ea { animation: toAliceFromEvil .8s ease-in-out; }
+    @keyframes toEvil { 0% { left: var(--node-center); opacity: 1 } 85% { left: 50%; opacity: 1 } 100% { left: 50%; opacity: 0 } }
+    @keyframes toBob { 0% { left: 50%; opacity: 1 } 85% { left: calc(100% - var(--node-center)); opacity: 1 } 100% { left: calc(100% - var(--node-center)); opacity: 0 } }
+    @keyframes toOther { 0% { left: var(--node-center); opacity: 1 } 85% { left: calc(100% - var(--node-center)); opacity: 1 } 100% { left: calc(100% - var(--node-center)); opacity: 0 } }
+    @keyframes toAlice { 0% { left: calc(100% - var(--node-center)); opacity: 1 } 85% { left: var(--node-center); opacity: 1 } 100% { left: var(--node-center); opacity: 0 } }
+    @keyframes toEvilReverse { 0% { left: calc(100% - var(--node-center)); opacity: 1 } 85% { left: 50%; opacity: 1 } 100% { left: 50%; opacity: 0 } }
+    @keyframes toAliceFromEvil { 0% { left: 50%; opacity: 1 } 85% { left: var(--node-center); opacity: 1 } 100% { left: var(--node-center); opacity: 0 } }
+
+    .events { display: flex; min-height: 100%; flex-direction: column; }
+    .event-head { display: flex; justify-content: space-between; align-items: center; gap: 10px; margin-bottom: 14px; }
+    .event-head h2 { margin: 0; font-size: 17px; }
+    #o { flex: 1; min-height: 390px; max-height: 570px; overflow: auto; padding-right: 5px; }
+    #o::-webkit-scrollbar { width: 7px; } #o::-webkit-scrollbar-thumb { border-radius: 10px; background: rgba(148, 163, 184, .25); }
+    .empty { display: grid; place-items: center; min-height: 300px; padding: 35px; border: 1px dashed rgba(55, 91, 116, .28); border-radius: 15px; color: var(--muted); text-align: center; line-height: 1.7; }
+    .step-count { color: var(--muted); font-size: 12px; }
+    .log { position: relative; margin: 8px 0; padding: 11px 12px 11px 40px; border: 1px solid rgba(55, 91, 116, .15); border-left: 3px solid rgba(55, 91, 116, .42); border-radius: 10px; color: var(--text); background: rgba(236, 250, 252, .34); line-height: 1.55; overflow-wrap: anywhere; word-break: break-word; font-size: 13px; }
+    .log::before { content: attr(data-step); position: absolute; left: 10px; top: 12px; color: var(--muted); font-size: 11px; font-variant-numeric: tabular-nums; }
+    .log b { margin-right: 7px; font-size: 12px; }
+    .log.Alice { border-left-color: var(--green); } .log.Alice b { color: var(--green); }
+    .log.Bob { border-left-color: var(--red); } .log.Bob b { color: #fda4af; }
+    .log.Evil { border-left-color: var(--yellow); } .log.Evil b { color: var(--yellow); }
+    .result { margin-top: 14px; padding: 14px; border: 1px solid rgba(22, 133, 167, .24); border-radius: 13px; background: rgba(232, 249, 253, .36); line-height: 1.65; }
+    .result strong { color: var(--cyan); }
+    .result.blocked { border-color: rgba(251, 113, 133, .28); background: rgba(127, 29, 49, .16); }
+    .result.blocked strong { color: #fda4af; }
+
+    @media (max-width: 1060px) { .control-grid { grid-template-columns: 1fr 1fr; } .grid { grid-template-columns: 1fr; } #o { max-height: none; } }
+    @media (max-width: 700px) { .shell { width: min(100% - 24px, 620px); padding-top: 22px; } .hero { align-items: start; } .control-grid { grid-template-columns: 1fr; } .network { --node-center: 40px; grid-template-columns: 80px minmax(0, 1fr) 80px minmax(0, 1fr) 80px; gap: 7px; min-height: 230px; padding: 18px 4px; } .node { width: 80px; padding: 12px 3px; border-radius: 13px; font-size: 12px; } .node .icon { font-size: 25px; } .node::after { font-size: 8px; } .topology, .events { padding: 16px; } }
+  </style>
+</head>
+<body>
+  <main class="shell">
+    <header class="hero">
+      <div>
+        <div class="eyebrow">CyberST · Interactive Security Lab</div>
+        <h1>通信攻防实验器</h1>
+      </div>
+    </header>
+
+    <section class="panel controls">
+      <div class="control-grid">
+        <div class="field">
+          <label for="message">消息内容</label>
+          <input id="message" type="text" value="Meet at 10:00" autocomplete="off">
+        </div>
+        <div class="field">
+          <label for="attack">实验场景</label>
+          <select id="attack">
+            <option value="none">正常通信</option>
+            <option value="key_replace">密钥替换 / 窃听</option>
+            <option value="tamper">消息篡改</option>
+            <option value="replay">重放攻击</option>
+          </select>
+        </div>
+        <label class="toggle" for="defense"><input id="defense" type="checkbox"><span>启用防御措施</span></label>
+        <button id="run" type="button">运行实验</button>
+        <button id="next" type="button" disabled>下一步</button>
+      </div>
+    </section>
+
+    <div class="grid">
+      <section class="panel topology">
+        <div class="panel-heading">
+          <div><h2>通信拓扑</h2></div>
+          <div id="status" class="status"><i class="status-dot"></i><span>等待实验</span></div>
+        </div>
+        <div class="network" id="network">
+          <div id="alice" class="node" data-role="sender"><div class="icon">👩‍💻</div><b>Alice</b></div>
+          <div id="link1" class="link"></div>
+          <div id="evil" class="node" data-role="interceptor"><div class="icon">🕵️</div><b>Evil</b></div>
+          <div id="link2" class="link"></div>
+          <div id="bob" class="node" data-role="receiver"><div class="icon">👨‍💻</div><b>Bob</b></div>
+          <i id="packet" class="packet" aria-hidden="true"></i>
+        </div>
+      </section>
+
+      <section class="panel events">
+        <div class="event-head"><div><h2>事件日志</h2><div id="step-count" class="step-count">运行实验后可逐步查看</div></div></div>
+        <div id="output"><div class="empty">选择一个场景并运行实验<br>然后点击“下一步”观察每个通信动作</div></div>
+      </section>
+    </div>
+  </main>
+
+  <script>
+    const $ = id => document.getElementById(id);
+    const esc = value => String(value).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+    const refs = { message: $('message'), attack: $('attack'), defense: $('defense'), run: $('run'), next: $('next'), output: $('output'), stepCount: $('step-count'), status: $('status'), packet: $('packet'), alice: $('alice'), evil: $('evil'), bob: $('bob'), links: document.querySelectorAll('.link') };
+    let experiment = null;
+    let currentStep = 0;
+
+    refs.packet.addEventListener('animationend', () => { refs.packet.style.opacity = '0'; });
+    refs.run.addEventListener('click', runExperiment);
+    refs.next.addEventListener('click', nextStep);
+
+    async function runExperiment() {
+      refs.run.disabled = true;
+      refs.status.className = 'status ready';
+      refs.status.querySelector('span').textContent = '正在加载后端模拟…';
+      try {
+        const response = await fetch('/api/simulate', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({ message: refs.message.value, attack: refs.attack.value, defense: refs.defense.checked }) });
+        if (!response.ok) throw new Error('HTTP ' + response.status);
+        experiment = await response.json();
+        currentStep = 0;
+        refs.next.disabled = !experiment.logs.length;
+        render();
+      } catch (error) {
+        refs.output.innerHTML = '<div class="empty">无法连接后端服务：' + esc(error.message) + '</div>';
+        refs.stepCount.textContent = '请求失败';
+        refs.status.className = 'status blocked';
+        refs.status.querySelector('span').textContent = '连接失败';
+      } finally { refs.run.disabled = false; }
+    }
+
+    function nextStep() { if (experiment && currentStep < experiment.logs.length) { currentStep++; render(); } }
+
+    function animateFor(log) {
+      refs.packet.className = 'packet';
+      refs.packet.style.opacity = '0';
+      refs.links.forEach(link => link.classList.remove('animate'));
+      if (!log) return;
+      const actor = log.actor || '';
+      const action = log.action || '';
+      if (actor.includes('Alice')) refs.alice.classList.add('active');
+      if (actor.includes('Evil')) refs.evil.classList.add('active');
+      if (actor.includes('Bob')) refs.bob.classList.add('active');
+      if (actor === 'Alice' && action.includes('Send')) { refs.packet.classList.add('animate', 'ae'); refs.links[0].classList.add('animate'); }
+      if (actor === 'Bob' && action.includes('Send')) { refs.packet.classList.add('animate', 'be'); refs.links[1].classList.add('animate'); }
+      if (actor === 'Evil' && action.includes('Replace')) { refs.packet.classList.add('animate', action.includes('Bob key') ? 'ea' : 'eb'); refs.links[action.includes('Bob key') ? 1 : 0].classList.add('animate'); }
+      if (actor === 'Evil' && (action.includes('Forward') || action.includes('Replay'))) { const toAlice = log.detail.includes('Alice'); refs.packet.classList.add('animate', toAlice ? 'ea' : 'eb'); refs.links[toAlice ? 1 : 0].classList.add('animate'); }
+      if (actor === 'Evil' && action.includes('Tamper')) { refs.packet.classList.add('animate', 'eb'); refs.links[1].classList.add('animate'); }
+    }
+
+    function render() {
+      document.querySelectorAll('.node').forEach(node => node.classList.remove('active'));
+      const shown = experiment ? experiment.logs.slice(0, currentStep) : [];
+      animateFor(experiment && currentStep ? experiment.logs[currentStep - 1] : null);
+      refs.stepCount.textContent = experiment ? `步骤 ${currentStep} / ${experiment.logs.length}` : '运行实验后可逐步查看';
+      if (!experiment || !shown.length) { refs.output.innerHTML = '<div class="empty">选择一个场景并运行实验<br>然后点击“下一步”观察每个通信动作</div>'; return; }
+      const logs = shown.map((log, index) => `<div class="log ${esc(log.actor)}" data-step="${index + 1}"><b>${esc(log.actor)}</b> · ${esc(log.action)}<br>${esc(log.detail)}</div>`).join('');
+      let result = '';
+      if (currentStep === experiment.logs.length) {
+        const blocked = experiment.received === '[Rejected]' || experiment.received === '[Replay rejected]' || experiment.success === false;
+        const integrity = experiment.integrity === undefined ? '—' : experiment.integrity ? '✅ 通过' : '❌ 失败';
+        result = `<div class="result ${blocked ? 'blocked' : ''}"><strong>${esc(experiment.message)}</strong><br>Bob 最终结果：${esc(experiment.received || '未接收')}<br>完整性验证：${integrity}</div>`;
+        refs.status.className = blocked ? 'status blocked' : 'status success';
+        refs.status.querySelector('span').textContent = blocked ? '防御已触发' : '实验完成';
+      } else {
+        refs.status.className = 'status ready';
+        refs.status.querySelector('span').textContent = '逐步播放中';
+      }
+      refs.output.innerHTML = logs + result;
+      refs.output.scrollTop = refs.output.scrollHeight;
+    }
+  </script>
+</body>
+</html>
