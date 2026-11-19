@@ -7,7 +7,11 @@ from app.core import *
 
 
 def test_modexp_matches_reference_for_fixed_vectors():
-    for base, exponent, modulus in [(5, 12345, P), (123, 0, 7919), (987654, 321, 1000003)]:
+    for base, exponent, modulus in [
+        (5, 12345, P),
+        (123, 0, 7919),
+        (987654, 321, 1000003),
+    ]:
         assert modexp(base, exponent, modulus) == pow(base, exponent, modulus)
 
 
@@ -35,7 +39,12 @@ def test_sha256_known_vectors_against_reference_library():
     assert sha256(b"abc").hex() == (
         "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"
     )
-    for data in [b"", b"abc", b"The quick brown fox jumps over the lazy dog", bytes(range(256))]:
+    for data in [
+        b"",
+        b"abc",
+        b"The quick brown fox jumps over the lazy dog",
+        bytes(range(256)),
+    ]:
         assert sha256(data).hex() == hashlib.sha256(data).hexdigest()
 
 
@@ -54,7 +63,9 @@ def test_stream_cipher_matches_independent_reference():
     key = hashlib.sha256(f"mitm-lab:{shared}".encode()).digest()
     expected = bytearray()
     for i, byte in enumerate(text.encode()):
-        stream = hashlib.sha256(key + nonce.encode() + (i // 32).to_bytes(4, "big")).digest()
+        stream = hashlib.sha256(
+            key + nonce.encode() + (i // 32).to_bytes(4, "big")
+        ).digest()
         expected.append(byte ^ stream[i % 32])
     assert crypt(text, shared, nonce) == expected.hex()
     assert decrypt(expected.hex(), shared, nonce) == text
@@ -73,7 +84,9 @@ def test_wrong_key_does_not_recover_plaintext():
 def test_tag_matches_independent_hmac_reference_and_detects_changes():
     ciphertext = crypt("hello", 12345, "abc")
     key = hashlib.sha256(f"mitm-lab:{12345}".encode()).digest()
-    expected = hmac.new(key, f"sa-1:abc:{ciphertext}".encode(), hashlib.sha256).hexdigest()
+    expected = hmac.new(
+        key, f"sa-1:abc:{ciphertext}".encode(), hashlib.sha256
+    ).hexdigest()
     assert tag(ciphertext, 12345, "abc", "sa-1") == expected
     assert tag(ciphertext[:-2] + "00", 12345, "abc", "sa-1") != expected
     assert tag(ciphertext, 12345, "changed", "sa-1") != expected

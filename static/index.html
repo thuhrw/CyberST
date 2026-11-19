@@ -279,7 +279,7 @@
         const content = sessionLogs.length ? sessionLogs.map((log, sessionIndex) => {
           const globalIndex = experiment.logs.indexOf(log) + 1;
           const detailSeparator = ['observe_alice_key', 'observe_bob_key', 'forward_alice_key', 'forward_bob_key', 'forward_message', 'session_ready'].includes(log.kind) ? '，' : '<br>';
-          const detail = esc(log.detail).replaceAll('[intercepted]', '【已截获】').replaceAll('[Unable to decrypt]', '【无法解密】');
+          const detail = esc(log.detail);
           const detailMarkup = detail ? detailSeparator + detail : '';
           return `<div class="log ${esc(log.actor)}" data-step="${sessionIndex + 1}" data-global-step="${globalIndex}"><b>${esc(log.actor)}</b> · ${esc(log.action)}${detailMarkup}</div>`;
         }).join('') : '';
@@ -291,7 +291,7 @@
         finishExperiment();
         const blocked = experiment.received === '[Rejected]' || experiment.received === '[Replay rejected]' || experiment.success === false;
         const integrity = !experiment.defense ? '未启用' : experiment.integrity === undefined ? '未提供' : experiment.integrity ? '通过' : '失败';
-        const received = ({'[Rejected]':'已拒绝','[Replay rejected]':'重放已拒绝','[Unable to decrypt]':'无法解密','[无法解密]':'无法解密'})[experiment.received] || String(experiment.received || '未接收').replace(' [intercepted]', '【已截获】');
+        const received = ({'[Rejected]':'已拒绝','[Replay rejected]':'重放已拒绝'})[experiment.received] || String(experiment.received || '未接收');
         result = `<div class="result ${blocked ? 'blocked' : ''}"><strong>${esc(experiment.message)}</strong><br>Bob 最终结果：${esc(received)}<br>完整性验证：${integrity}</div>`;
         refs.status.className = blocked ? 'status blocked' : 'status success';
         refs.status.querySelector('span').textContent = blocked ? '防御已触发' : '实验完成';
