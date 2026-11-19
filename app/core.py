@@ -43,8 +43,11 @@ def modexp(b: int, e: int, m: int = P) -> int:
 
 
 def dh_keypair() -> tuple[int, int]:
-    private = secrets.randbelow(P - 3) + 2
-    return private, modexp(G, private)
+    while True:
+        private = secrets.randbelow(P - 3) + 2
+        public = modexp(G, private)
+        if 2 <= public <= P - 2:
+            return private, public
 
 
 def dh_shared(private: int, public: int) -> int:
@@ -117,14 +120,14 @@ def crypt(text: str, shared: int, nonce: str) -> str:
     return out.hex()
 
 
-def decrypt(ciphertext: str, shared: int, nonce: str) -> str:
+def decrypt(ciphertext: str, shared: int, nonce: str, errors: str = "strict") -> str:
     encrypted = bytes.fromhex(ciphertext)
     key = _k(shared)
     plain = bytearray()
     for i, byte in enumerate(encrypted):
         stream = sha256(key + nonce.encode() + (i // 32).to_bytes(4, "big"))
         plain.append(byte ^ stream[i % 32])
-    return plain.decode()
+    return plain.decode(errors=errors)
 
 
 def tag(
