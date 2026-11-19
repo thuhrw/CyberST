@@ -30,20 +30,20 @@ def _new_session_id() -> str:
     return secrets.token_hex(12)
 
 
-def _encrypted_value(value: int, shared: int, session_id: str, sequence: int) -> dict:
+def _encrypted_value(value: int, shared: int, session_id: str) -> dict:
     nonce = secrets.token_hex(12)
     ciphertext = crypt(str(value), shared, nonce)
     return {
         "ciphertext": ciphertext,
         "nonce": nonce,
-        "tag": tag(ciphertext, shared, nonce, sequence, session_id),
+        "tag": tag(ciphertext, shared, nonce, session_id),
     }
 
 
-def _open_value(packet: dict, shared: int, session_id: str, sequence: int) -> int:
+def _open_value(packet: dict, shared: int, session_id: str) -> int:
     valid = constant_time_equal(
         packet.get("tag", ""),
-        tag(packet["ciphertext"], shared, packet["nonce"], sequence, session_id),
+        tag(packet["ciphertext"], shared, packet["nonce"], session_id),
     )
     if not valid:
         raise ValueError("invalid authenticated session public key")
@@ -56,7 +56,7 @@ def run(message, attack="none", defense=False):
 
     logs = []
     key_session_id = _new_session_id() if defense else ""
-    communication_session_id = _new_session_id() if defense else ""
+    communication_session_id = _new_session_id()
 
     def log(actor, action, detail, session_id, kind):
         entry = {
@@ -86,21 +86,21 @@ def run(message, attack="none", defense=False):
             raise RuntimeError("long-term DH agreement failed")
         log("Alice/Bob", "建立长期 K", "线下交换完成，长期共享密钥仅用于保护会话公钥", key_session_id, "long_term")
 
-    # Ephemeral key pairs are exchanged in the key_exchange session. The
-    # receiver always uses Alice's session_id and does not create a new one.
+    # With defense enabled, ephemeral key pairs are exchanged in the
+    # key_exchange session. The receiver always uses Alice's session_id and
+    # does not create a new one. Without defense, this exchange remains plain
+    # DH traffic and has no session metadata.
     alice_session_private, alice_session_public = dh_keypair()
     bob_session_private, bob_session_public = dh_keypair()
     public_key_label = "会话 public key" if defense else "public key"
     log("Alice", f"生成 {public_key_label}", f"public key={alice_session_public}", key_session_id, "generate_session_key")
     log("Bob", f"生成 {public_key_label}", f"public key={bob_session_public}", key_session_id, "generate_session_key")
-    if defense:
-        log("Alice", "生成 session_id", f"session_id={key_session_id}", key_session_id, "generate_session_id")
 
     exchange_transcript = []
     key_replay_cache = NonceReplayCache()
     if defense:
-        alice_packet = _encrypted_value(alice_session_public, long_shared, key_session_id, 1)
-        log("Alice", "发送加密会话 public key", f"session_id={key_session_id}，密文={alice_packet['ciphertext']}", key_session_id, "send_session_key")
+        alice_packet = _encrypted_value(alice_session_public, long_shared, key_session_id)
+        log("Alice", "发送加密会话 public key", f"session_id={key_session_id}，密文={alice_packet['ciphertext']}，nonce={alice_packet['nonce']}，tag={alice_packet['tag']}", key_session_id, "send_session_key")
         exchange_transcript.append(packet_event("Alice", "Evil", alice_packet, key_session_id))
         if attack == "key_replace":
             log("Evil", "发现这是密文", "放弃替换", key_session_id, "observe_alice_key")
@@ -108,11 +108,11 @@ def run(message, attack="none", defense=False):
             log("Evil", "转发加密会话 public key", "保持密文不变", key_session_id, "forward_alice_key")
         if not key_replay_cache.accept(alice_packet["nonce"], key_session_id):
             raise ValueError("replayed key exchange packet")
-        received_alice = _open_value(alice_packet, long_shared, key_session_id, 1)
-        log("Bob", "接收会话 public key", f"session_id={key_session_id}，public key={received_alice}", key_session_id, "receive_session_key")
+        received_alice = _open_value(alice_packet, long_shared, key_session_id)
+        log("Bob", "接收会话 public key", "", key_session_id, "receive_session_key")
 
-        bob_packet = _encrypted_value(bob_session_public, long_shared, key_session_id, 2)
-        log("Bob", "发送加密会话 public key", f"session_id={key_session_id}，密文={bob_packet['ciphertext']}", key_session_id, "send_session_key")
+        bob_packet = _encrypted_value(bob_session_public, long_shared, key_session_id)
+        log("Bob", "发送加密会话 public key", f"session_id={key_session_id}，密文={bob_packet['ciphertext']}，nonce={bob_packet['nonce']}，tag={bob_packet['tag']}", key_session_id, "send_session_key")
         exchange_transcript.append(packet_event("Bob", "Evil", bob_packet, key_session_id))
         if attack == "key_replace":
             log("Evil", "发现这是密文", "放弃替换", key_session_id, "observe_bob_key")
@@ -120,8 +120,8 @@ def run(message, attack="none", defense=False):
             log("Evil", "转发加密会话 public key", "保持密文不变", key_session_id, "forward_bob_key")
         if not key_replay_cache.accept(bob_packet["nonce"], key_session_id):
             raise ValueError("replayed key exchange packet")
-        received_bob = _open_value(bob_packet, long_shared, key_session_id, 2)
-        log("Alice", "接收会话 public key", f"session_id={key_session_id}，public key={received_bob}", key_session_id, "receive_session_key")
+        received_bob = _open_value(bob_packet, long_shared, key_session_id)
+        log("Alice", "接收会话 public key", "", key_session_id, "receive_session_key")
         evil_left = evil_right = None
     else:
         log("Alice", "发送 public key", f"public key={alice_session_public}", key_session_id, "send_session_key")
@@ -134,7 +134,7 @@ def run(message, attack="none", defense=False):
         else:
             received_alice = alice_session_public
             log("Evil", "转发 public key", "保持 public key 不变", key_session_id, "forward_alice_key")
-        log("Bob", "接收 public key", f"public key={received_alice}", key_session_id, "receive_session_key")
+        log("Bob", "接收 public key", "", key_session_id, "receive_session_key")
 
         log("Bob", "发送 public key", f"public key={bob_session_public}", key_session_id, "send_session_key")
         exchange_transcript.append(packet_event("Bob", "Evil", {"public_key": bob_session_public}, key_session_id))
@@ -148,13 +148,13 @@ def run(message, attack="none", defense=False):
         else:
             received_bob = bob_session_public
             log("Evil", "转发 public key", "保持 public key 不变", key_session_id, "forward_bob_key")
-        log("Alice", "接收 public key", f"public key={received_bob}", key_session_id, "receive_session_key")
+        log("Alice", "接收 public key", "", key_session_id, "receive_session_key")
 
     alice_shared = dh_shared(alice_session_private, received_bob)
     bob_shared = dh_shared(bob_session_private, received_alice)
     if alice_shared == bob_shared:
         if defense:
-            log("Alice/Bob", "完成会话密钥协商", f"session_id={key_session_id}，双方得到同一个 session K，进入新的通信 session", key_session_id, "session_ready")
+            log("Alice/Bob", "完成会话密钥协商", "双方得到同一个 session K，进入新的通信 session", key_session_id, "session_ready")
         else:
             log("Alice/Bob", "完成密钥协商", "双方得到同一个共享 K", "", "session_ready")
 
@@ -163,11 +163,10 @@ def run(message, attack="none", defense=False):
     communication_packet = {
         "ciphertext": ciphertext,
         "nonce": nonce,
-        "tag": tag(ciphertext, alice_shared, nonce, 1, communication_session_id),
+        "tag": tag(ciphertext, alice_shared, nonce, communication_session_id),
     }
-    if defense:
-        log("Alice", "生成 session_id", f"session_id={communication_session_id}", communication_session_id, "generate_session_id")
-    log("Alice", "发送消息", f"密文={ciphertext}，nonce={nonce}，标签={communication_packet['tag']}", communication_session_id, "send_message")
+    message_prefix = f"session_id={communication_session_id}，" if communication_session_id else ""
+    log("Alice", "发送消息", f"{message_prefix}密文={ciphertext}，nonce={nonce}，tag={communication_packet['tag']}", communication_session_id, "send_message")
     transcript = [packet_event("Alice", "Evil", communication_packet, communication_session_id)]
 
     if attack == "tamper":
@@ -178,8 +177,8 @@ def run(message, attack="none", defense=False):
     elif attack == "key_replace" and not defense:
         plaintext = decrypt(communication_packet["ciphertext"], evil_alice, communication_packet["nonce"])
         communication_packet["ciphertext"] = crypt(plaintext + " [intercepted]", evil_bob, communication_packet["nonce"])
-        communication_packet["tag"] = tag(communication_packet["ciphertext"], evil_bob, communication_packet["nonce"], 1, communication_session_id)
-        log("Evil", "解密并转发消息", f"截获明文：{plaintext}", communication_session_id, "decrypt_forward_message")
+        communication_packet["tag"] = tag(communication_packet["ciphertext"], evil_bob, communication_packet["nonce"], communication_session_id)
+        log("Evil", "解密并重新加密消息", f"截获明文：{plaintext}", communication_session_id, "decrypt_forward_message")
     elif attack == "key_replace" and defense:
         log("Evil", "转发消息", "保持密文不变", communication_session_id, "forward_message")
     else:
@@ -192,7 +191,7 @@ def run(message, attack="none", defense=False):
         current_nonce = current_packet["nonce"]
         valid = constant_time_equal(
             current_packet["tag"],
-            tag(current_packet["ciphertext"], bob_shared, current_nonce, 1, packet_session_id),
+            tag(current_packet["ciphertext"], bob_shared, current_nonce, packet_session_id),
         )
         if defense and not valid:
             log("Bob", "拒绝消息", "完整性校验失败", packet_session_id, "reject_integrity")
@@ -225,12 +224,12 @@ def run(message, attack="none", defense=False):
                 {"session_id": communication_session_id, "type": "communication", "label": "加密通信"},
             ]
             if defense
-            else [{"type": "communication", "label": "普通通信"}]
+            else [{"session_id": communication_session_id, "type": "communication", "label": "普通通信"}]
         ),
         "session_ids": (
             {"key_exchange": key_session_id, "communication": communication_session_id}
             if defense
-            else {}
+            else {"communication": communication_session_id}
         ),
         "exchange_transcript": exchange_transcript,
         "transcript": transcript,

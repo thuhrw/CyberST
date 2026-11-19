@@ -280,7 +280,8 @@
           const globalIndex = experiment.logs.indexOf(log) + 1;
           const detailSeparator = ['observe_alice_key', 'observe_bob_key', 'forward_alice_key', 'forward_bob_key', 'forward_message', 'session_ready'].includes(log.kind) ? '，' : '<br>';
           const detail = esc(log.detail).replaceAll('[intercepted]', '【已截获】').replaceAll('[Unable to decrypt]', '【无法解密】');
-          return `<div class="log ${esc(log.actor)}" data-step="${sessionIndex + 1}" data-global-step="${globalIndex}"><b>${esc(log.actor)}</b> · ${esc(log.action)}${detailSeparator}${detail}</div>`;
+          const detailMarkup = detail ? detailSeparator + detail : '';
+          return `<div class="log ${esc(log.actor)}" data-step="${sessionIndex + 1}" data-global-step="${globalIndex}"><b>${esc(log.actor)}</b> · ${esc(log.action)}${detailMarkup}</div>`;
         }).join('') : '';
         return `<section class="session-column"><h3>${esc(session.label)}</h3>${content}</section>`;
       }).join('');

@@ -134,12 +134,11 @@ def tag(
     ciphertext: str,
     shared: int,
     nonce: str,
-    sequence: int = 0,
     session_id: str = "",
 ) -> str:
     """Authenticate all fields that affect freshness and decryption."""
     return hmac_sha256(
-        _k(shared), f"{session_id}:{sequence}:{nonce}:{ciphertext}".encode()
+        _k(shared), f"{session_id}:{nonce}:{ciphertext}".encode()
     ).hex()
 
 

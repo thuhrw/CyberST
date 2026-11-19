@@ -17,6 +17,7 @@ def test_key_replacement_is_visible_without_defense_and_encrypted_with_defense()
     attack = run("secret", "key_replace", False)
     assert attack["received"] == "secret [intercepted]"
     assert attack["integrity"] is True
+    assert any(log["action"] == "解密并重新加密消息" for log in attack["logs"])
 
     defended = run("secret", "key_replace", True)
     assert defended["success"] is True
@@ -34,12 +35,37 @@ def test_defended_session_key_exchange_contains_only_authenticated_ciphertext():
     assert {log["session_id"] for log in result["logs"]} == {key_session, communication_session}
 
 
-def test_unauthenticated_flow_does_not_create_sessions():
+def test_unauthenticated_flow_has_a_session_for_encrypted_messages_only():
     result = run("hello", "none", False)
-    assert result["session_ids"] == {}
-    assert result["sessions"] == [{"type": "communication", "label": "普通通信"}]
-    assert all("session_id" not in log for log in result["logs"])
-    assert all("session_id" not in packet for packet in result["transcript"])
+    assert set(result["session_ids"]) == {"communication"}
+    communication_id = result["session_ids"]["communication"]
+    assert result["sessions"] == [
+        {"session_id": communication_id, "type": "communication", "label": "普通通信"}
+    ]
+    assert all(log["kind"] != "generate_session_id" for log in result["logs"])
+
+    communication_kinds = {
+        "send_message",
+        "forward_message",
+        "receive_message",
+        "tamper_message",
+        "replay_message",
+        "decrypt_forward_message",
+        "reject_integrity",
+        "reject_replay",
+    }
+    assert all(
+        log.get("session_id") == communication_id
+        for log in result["logs"]
+        if log["kind"] in communication_kinds
+    )
+    assert all(
+        "session_id" not in log
+        for log in result["logs"]
+        if log["kind"] not in communication_kinds
+    )
+    assert all(packet["session_id"] == communication_id for packet in result["transcript"])
+    assert all("session_id" not in packet for packet in result["exchange_transcript"])
 
 
 def test_tampering_fails_integrity_and_is_rejected_by_defense():
