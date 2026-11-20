@@ -142,8 +142,7 @@ mitm-lab/
 │   ├── simulation.py    # Alice/Evil/Bob 协议和攻击模拟
 │   └── main.py          # FastAPI 应用和 HTTP 接口
 ├── static/
-│   ├── index.html       # 交互式实验界面
-│   └── project-background.webp
+│   └── index.html       # 交互式实验界面
 ├── tests/
 │   ├── test_core.py     # 算法与标准库参考结果对照
 │   └── test_simulation.py # 端到端攻防流程测试
