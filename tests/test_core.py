@@ -68,6 +68,12 @@ def test_dh_keypairs_and_shared_secret_match_modular_arithmetic():
     assert alice_shared == pow(bob_public, alice_private, P)
 
 
+def test_dh_generator_has_large_subgroup_order():
+    # P is a safe prime, so this proves G=2 is not trapped in the small
+    # order-two subgroup and cannot reproduce the old Mersenne-prime bug.
+    assert pow(G, (P - 1) // 2, P) == P - 1
+
+
 @pytest.mark.parametrize("private, public", [(1, 2), (P - 1, 2), (2, 1), (2, P - 1)])
 def test_dh_rejects_out_of_range_values(private, public):
     with pytest.raises(ValueError):

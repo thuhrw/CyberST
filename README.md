@@ -4,7 +4,6 @@
 
 项目通过 Alice、Evil、Bob 三个角色还原通信过程。前端以拓扑图和分步日志展示每个动作，后端则实际执行密钥生成、共享密钥计算、加密、解密、HMAC 校验和 nonce 重放检测，而不是只根据条件输出预设日志。
 
-> 这是密码学教学模拟器。项目中的密码组件用于展示算法流程，不应替代生产环境中的 TLS、AES-GCM 或 ChaCha20-Poly1305 实现。
 
 ## 功能亮点
 
@@ -61,7 +60,7 @@ uv run pytest
 
 ### 启用防御
 
-1. Alice 和 Bob 使用线下预置的长期 DH public key 得到长期共享密钥。
+1. Alice 和 Bob 使用模拟线下预置的长期 DH 密钥对，通过各自私钥和对方公钥得到长期共享密钥。
 2. 每次实验创建独立的 `key_exchange` session。
 3. 双方的临时 session public key 使用长期共享密钥加密，并用 HMAC 绑定密文、nonce 和 session ID。
 4. Evil 只能转发经过认证的密文，不能直接替换其中的 session public key。
@@ -86,11 +85,10 @@ uv run pytest
 - `modexp()`：快速模幂，用于 DH 公钥和共享密钥计算。
 - `sha256()`：本地实现的 SHA-256，测试中与 `hashlib.sha256` 对照。
 - `hmac_sha256()`：本地实现的 HMAC-SHA256，测试中与 `hmac.new` 对照。
-- `crypt()` / `decrypt()`：基于 SHA-256 密钥流和 XOR 的教学加密封装。
+- `crypt()` / `decrypt()`：基于 SHA-256 密钥流和 XOR 的加密封装。
 - `tag()`：对 `session_id`、`nonce` 和密文计算认证标签。
 - `constant_time_equal()`：用于标签比较的常量时间比较函数。
 
-`crypt()` 是项目自定义的教学构造，并不是 AES 或 ChaCha20。测试会用独立的 `hashlib` 参考实现验证其计算结果，但结果一致不代表该构造适合生产环境。
 
 ## HTTP API
 
@@ -130,6 +128,9 @@ curl -X POST http://127.0.0.1:8000/api/simulate \
 - `received`：Bob 最终收到的内容或拒绝结果；
 - `integrity`：最终报文的完整性校验结果；
 - `replay_detected`：是否执行了重放场景。
+- `success`：模拟流程是否成功执行；
+- `message`：本次实验的结果说明；
+- `defense`：本次实验是否启用防御。
 
 ## 项目结构
 

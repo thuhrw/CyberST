@@ -2,9 +2,15 @@
 
 import secrets
 
-# The 521-bit Mersenne prime is compact to express and large enough for this
-# teaching simulation; the original 31-bit modulus was trivially brute-forceable.
-P = (1 << 521) - 1
+# A 521-bit safe prime. With this modulus, 2 has order P - 1, so the DH
+# public keys span a large group instead of collapsing to powers modulo 521.
+# The original Mersenne modulus made 2^521 == 1 (mod P), which gave G=2 a
+# tiny order despite the modulus being 521 bits wide.
+P = int(
+    "01E37ACB799BB9EF3847AFF01C638CBC5C43081B1A5662A5204790F92A575F4"
+    "2729D4EDFB258D38334580701343BD0C6BA12867A8118EA65A013F630E3F300E936AB",
+    16,
+)
 G = 2
 _SHA256_K = (
     0x428A2F98,

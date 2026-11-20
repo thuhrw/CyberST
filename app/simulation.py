@@ -1,6 +1,7 @@
 """Protocol-level simulation for the interactive MITM lab."""
 
 import secrets
+from dataclasses import dataclass, field
 
 from .core import (
     constant_time_equal,
@@ -18,6 +19,141 @@ from .replay import NonceReplayCache
 _LONG_TERM_KEYS = None
 
 
+@dataclass
+class Party:
+    """State held by an honest endpoint in one simulated protocol run."""
+
+    name: str
+    replay_cache: NonceReplayCache = field(default_factory=NonceReplayCache)
+    long_private: int | None = None
+    long_public: int | None = None
+    long_shared: int | None = None
+    session_private: int | None = None
+    session_public: int | None = None
+    session_shared: int | None = None
+
+    def provision_long_term(self, private: int, public: int) -> None:
+        self.long_private = private
+        self.long_public = public
+
+    def establish_long_shared(self, peer_public: int) -> None:
+        if self.long_private is None:
+            raise RuntimeError(f"{self.name} has no long-term private key")
+        self.long_shared = dh_shared(self.long_private, peer_public)
+
+    def generate_session_keypair(self) -> None:
+        self.session_private, self.session_public = dh_keypair()
+
+    def encrypt_session_public_key(self, session_id: str) -> dict:
+        """Encrypt this party's ephemeral public key for its peer."""
+        if self.long_shared is None:
+            raise RuntimeError(f"{self.name} has no long-term shared key")
+        if self.session_public is None:
+            raise RuntimeError(f"{self.name} has no session public key")
+        nonce = secrets.token_hex(12)
+        ciphertext = crypt(str(self.session_public), self.long_shared, nonce)
+        return {
+            "ciphertext": ciphertext,
+            "nonce": nonce,
+            "tag": tag(ciphertext, self.long_shared, nonce, session_id),
+        }
+
+    def open_session_public_key(self, packet: dict, session_id: str) -> int:
+        """Verify and decrypt a peer's ephemeral public key."""
+        if self.long_shared is None:
+            raise RuntimeError(f"{self.name} has no long-term shared key")
+        valid = constant_time_equal(
+            packet.get("tag", ""),
+            tag(
+                packet["ciphertext"],
+                self.long_shared,
+                packet["nonce"],
+                session_id,
+            ),
+        )
+        if not valid:
+            raise ValueError("invalid authenticated session public key")
+        return int(decrypt(packet["ciphertext"], self.long_shared, packet["nonce"]))
+
+    def establish_session_shared(self, peer_public: int) -> None:
+        if self.session_private is None:
+            raise RuntimeError(f"{self.name} has no session private key")
+        self.session_shared = dh_shared(self.session_private, peer_public)
+
+    def encrypt_message(self, message: str, session_id: str) -> dict:
+        if self.session_shared is None:
+            raise RuntimeError(f"{self.name} has no session shared key")
+        nonce = secrets.token_hex(12)
+        ciphertext = crypt(message, self.session_shared, nonce)
+        return {
+            "ciphertext": ciphertext,
+            "nonce": nonce,
+            "tag": tag(ciphertext, self.session_shared, nonce, session_id),
+        }
+
+    def verify_message(self, packet: dict, session_id: str) -> bool:
+        if self.session_shared is None:
+            raise RuntimeError(f"{self.name} has no session shared key")
+        return constant_time_equal(
+            packet.get("tag", ""),
+            tag(
+                packet["ciphertext"],
+                self.session_shared,
+                packet["nonce"],
+                session_id,
+            ),
+        )
+
+    def decrypt_message(self, packet: dict) -> str:
+        if self.session_shared is None:
+            raise RuntimeError(f"{self.name} has no session shared key")
+        return decrypt(
+            packet["ciphertext"],
+            self.session_shared,
+            packet["nonce"],
+            errors="replace",
+        )
+
+
+@dataclass
+class Evil:
+    """Ephemeral state created only when an unauthenticated MITM is run."""
+
+    left_private: int | None = None
+    left_public: int | None = None
+    right_private: int | None = None
+    right_public: int | None = None
+    alice_shared: int | None = None
+    bob_shared: int | None = None
+
+    def prepare_key_replacement(self, alice_public: int, bob_public: int) -> None:
+        self.left_private, self.left_public = dh_keypair()
+        self.right_private, self.right_public = dh_keypair()
+        self.alice_shared = dh_shared(self.right_private, alice_public)
+        self.bob_shared = dh_shared(self.left_private, bob_public)
+
+    def tamper_message(self, packet: dict) -> None:
+        """Modify ciphertext without knowing the authentication key."""
+        packet["ciphertext"] = (
+            "00" if packet["ciphertext"][:2] != "00" else "ff"
+        ) + packet["ciphertext"][2:]
+
+    def decrypt_and_reencrypt(self, packet: dict, session_id: str) -> str:
+        """Decrypt on the Alice side and authenticate a fresh Bob-side packet."""
+        if self.alice_shared is None or self.bob_shared is None:
+            raise RuntimeError("Evil has no MITM session keys")
+        plaintext = decrypt(packet["ciphertext"], self.alice_shared, packet["nonce"])
+        packet["ciphertext"] = crypt(plaintext, self.bob_shared, packet["nonce"])
+        packet["tag"] = tag(
+            packet["ciphertext"], self.bob_shared, packet["nonce"], session_id
+        )
+        return plaintext
+
+    def replay_message(self, packet: dict) -> dict:
+        """Return a separate copy of a captured packet for retransmission."""
+        return dict(packet)
+
+
 def _long_term_keys():
     global _LONG_TERM_KEYS
     if _LONG_TERM_KEYS is None:
@@ -29,26 +165,6 @@ def _new_session_id() -> str:
     return secrets.token_hex(12)
 
 
-def _encrypted_value(value: int, shared: int, session_id: str) -> dict:
-    nonce = secrets.token_hex(12)
-    ciphertext = crypt(str(value), shared, nonce)
-    return {
-        "ciphertext": ciphertext,
-        "nonce": nonce,
-        "tag": tag(ciphertext, shared, nonce, session_id),
-    }
-
-
-def _open_value(packet: dict, shared: int, session_id: str) -> int:
-    valid = constant_time_equal(
-        packet.get("tag", ""),
-        tag(packet["ciphertext"], shared, packet["nonce"], session_id),
-    )
-    if not valid:
-        raise ValueError("invalid authenticated session public key")
-    return int(decrypt(packet["ciphertext"], shared, packet["nonce"]))
-
-
 def run(message, attack="none", defense=False):
     if attack not in {"none", "key_replace", "tamper", "replay"}:
         raise ValueError("unknown attack scenario")
@@ -56,6 +172,9 @@ def run(message, attack="none", defense=False):
     logs = []
     key_session_id = _new_session_id() if defense else ""
     communication_session_id = _new_session_id()
+    alice = Party("Alice")
+    bob = Party("Bob")
+    evil = Evil()
 
     def log(actor, action, detail, session_id, kind):
         entry = {
@@ -76,12 +195,13 @@ def run(message, attack="none", defense=False):
 
     # The long-term key exists only in the defended protocol. It is provisioned
     # outside the network, so Evil cannot replace it during this experiment.
-    long_shared = None
     if defense:
         alice_private, alice_public, bob_private, bob_public = _long_term_keys()
-        long_shared = dh_shared(alice_private, bob_public)
-        bob_long_shared = dh_shared(bob_private, alice_public)
-        if long_shared != bob_long_shared:
+        alice.provision_long_term(alice_private, alice_public)
+        bob.provision_long_term(bob_private, bob_public)
+        alice.establish_long_shared(bob.long_public)
+        bob.establish_long_shared(alice.long_public)
+        if alice.long_shared != bob.long_shared:
             raise RuntimeError("long-term DH agreement failed")
         log(
             "Alice/Bob",
@@ -95,30 +215,27 @@ def run(message, attack="none", defense=False):
     # key_exchange session. The receiver always uses Alice's session_id and
     # does not create a new one. Without defense, this exchange remains plain
     # DH traffic and has no session metadata.
-    alice_session_private, alice_session_public = dh_keypair()
-    bob_session_private, bob_session_public = dh_keypair()
+    alice.generate_session_keypair()
+    bob.generate_session_keypair()
     public_key_label = "会话 public key" if defense else "public key"
     log(
         "Alice",
         f"生成 {public_key_label}",
-        f"public key={alice_session_public}",
+        f"public key={alice.session_public}",
         key_session_id,
         "generate_session_key",
     )
     log(
         "Bob",
         f"生成 {public_key_label}",
-        f"public key={bob_session_public}",
+        f"public key={bob.session_public}",
         key_session_id,
         "generate_session_key",
     )
 
     exchange_transcript = []
-    key_replay_cache = NonceReplayCache()
     if defense:
-        alice_packet = _encrypted_value(
-            alice_session_public, long_shared, key_session_id
-        )
+        alice_packet = alice.encrypt_session_public_key(key_session_id)
         log(
             "Alice",
             "发送加密会话 public key",
@@ -139,12 +256,12 @@ def run(message, attack="none", defense=False):
                 key_session_id,
                 "forward_alice_key",
             )
-        if not key_replay_cache.accept(alice_packet["nonce"], key_session_id):
+        if not bob.replay_cache.accept(alice_packet["nonce"], key_session_id):
             raise ValueError("replayed key exchange packet")
-        received_alice = _open_value(alice_packet, long_shared, key_session_id)
+        received_alice = bob.open_session_public_key(alice_packet, key_session_id)
         log("Bob", "接收会话 public key", "", key_session_id, "receive_session_key")
 
-        bob_packet = _encrypted_value(bob_session_public, long_shared, key_session_id)
+        bob_packet = bob.encrypt_session_public_key(key_session_id)
         log(
             "Bob",
             "发送加密会话 public key",
@@ -165,37 +282,35 @@ def run(message, attack="none", defense=False):
                 key_session_id,
                 "forward_bob_key",
             )
-        if not key_replay_cache.accept(bob_packet["nonce"], key_session_id):
+        if not alice.replay_cache.accept(bob_packet["nonce"], key_session_id):
             raise ValueError("replayed key exchange packet")
-        received_bob = _open_value(bob_packet, long_shared, key_session_id)
+        received_bob = alice.open_session_public_key(bob_packet, key_session_id)
         log("Alice", "接收会话 public key", "", key_session_id, "receive_session_key")
-        evil_left = evil_right = None
     else:
         log(
             "Alice",
             "发送 public key",
-            f"public key={alice_session_public}",
+            f"public key={alice.session_public}",
             key_session_id,
             "send_session_key",
         )
         exchange_transcript.append(
             packet_event(
-                "Alice", "Evil", {"public_key": alice_session_public}, key_session_id
+                "Alice", "Evil", {"public_key": alice.session_public}, key_session_id
             )
         )
         if attack == "key_replace":
-            evil_left_private, evil_left_public = dh_keypair()
-            evil_right_private, evil_right_public = dh_keypair()
-            received_alice = evil_left_public
+            evil.prepare_key_replacement(alice.session_public, bob.session_public)
+            received_alice = evil.left_public
             log(
                 "Evil",
                 "替换 Alice 的 public key",
-                f"转发 public key={evil_left_public} 给 Bob",
+                f"转发 public key={evil.left_public} 给 Bob",
                 key_session_id,
                 "replace_alice_session_key",
             )
         else:
-            received_alice = alice_session_public
+            received_alice = alice.session_public
             log(
                 "Evil",
                 "转发 public key",
@@ -208,30 +323,26 @@ def run(message, attack="none", defense=False):
         log(
             "Bob",
             "发送 public key",
-            f"public key={bob_session_public}",
+            f"public key={bob.session_public}",
             key_session_id,
             "send_session_key",
         )
         exchange_transcript.append(
             packet_event(
-                "Bob", "Evil", {"public_key": bob_session_public}, key_session_id
+                "Bob", "Evil", {"public_key": bob.session_public}, key_session_id
             )
         )
         if attack == "key_replace":
-            received_bob = evil_right_public
+            received_bob = evil.right_public
             log(
                 "Evil",
                 "替换 Bob 的 public key",
-                f"转发 public key={evil_right_public} 给 Alice",
+                f"转发 public key={evil.right_public} 给 Alice",
                 key_session_id,
                 "replace_bob_session_key",
             )
-            # Alice received Evil's right-hand public key; Bob received the
-            # left-hand one. Evil therefore has one shared key per direction.
-            evil_alice = dh_shared(evil_right_private, alice_session_public)
-            evil_bob = dh_shared(evil_left_private, bob_session_public)
         else:
-            received_bob = bob_session_public
+            received_bob = bob.session_public
             log(
                 "Evil",
                 "转发 public key",
@@ -241,9 +352,9 @@ def run(message, attack="none", defense=False):
             )
         log("Alice", "接收 public key", "", key_session_id, "receive_session_key")
 
-    alice_shared = dh_shared(alice_session_private, received_bob)
-    bob_shared = dh_shared(bob_session_private, received_alice)
-    if alice_shared == bob_shared:
+    alice.establish_session_shared(received_bob)
+    bob.establish_session_shared(received_alice)
+    if alice.session_shared == bob.session_shared:
         if defense:
             log(
                 "Alice/Bob",
@@ -257,20 +368,14 @@ def run(message, attack="none", defense=False):
                 "Alice/Bob", "完成密钥协商", "双方得到同一个共享 K", "", "session_ready"
             )
 
-    nonce = secrets.token_hex(12)
-    ciphertext = crypt(message, alice_shared, nonce)
-    communication_packet = {
-        "ciphertext": ciphertext,
-        "nonce": nonce,
-        "tag": tag(ciphertext, alice_shared, nonce, communication_session_id),
-    }
+    communication_packet = alice.encrypt_message(message, communication_session_id)
     message_prefix = (
         f"session_id={communication_session_id}，" if communication_session_id else ""
     )
     log(
         "Alice",
         "发送消息",
-        f"{message_prefix}密文={ciphertext}，nonce={nonce}，tag={communication_packet['tag']}",
+        f"{message_prefix}密文={communication_packet['ciphertext']}，nonce={communication_packet['nonce']}，tag={communication_packet['tag']}",
         communication_session_id,
         "send_message",
     )
@@ -279,9 +384,7 @@ def run(message, attack="none", defense=False):
     ]
 
     if attack == "tamper":
-        communication_packet["ciphertext"] = (
-            "00" if communication_packet["ciphertext"][:2] != "00" else "ff"
-        ) + communication_packet["ciphertext"][2:]
+        evil.tamper_message(communication_packet)
         log(
             "Evil",
             "篡改消息",
@@ -290,19 +393,8 @@ def run(message, attack="none", defense=False):
             "tamper_message",
         )
     elif attack == "key_replace" and not defense:
-        plaintext = decrypt(
-            communication_packet["ciphertext"],
-            evil_alice,
-            communication_packet["nonce"],
-        )
-        communication_packet["ciphertext"] = crypt(
-            plaintext, evil_bob, communication_packet["nonce"]
-        )
-        communication_packet["tag"] = tag(
-            communication_packet["ciphertext"],
-            evil_bob,
-            communication_packet["nonce"],
-            communication_session_id,
+        plaintext = evil.decrypt_and_reencrypt(
+            communication_packet, communication_session_id
         )
         log(
             "Evil",
@@ -331,19 +423,10 @@ def run(message, attack="none", defense=False):
     transcript.append(
         packet_event("Evil", "Bob", communication_packet, communication_session_id)
     )
-    replay_cache = NonceReplayCache()
 
     def deliver(current_packet, packet_session_id):
         current_nonce = current_packet["nonce"]
-        valid = constant_time_equal(
-            current_packet["tag"],
-            tag(
-                current_packet["ciphertext"],
-                bob_shared,
-                current_nonce,
-                packet_session_id,
-            ),
-        )
+        valid = bob.verify_message(current_packet, packet_session_id)
         if defense and not valid:
             log(
                 "Bob",
@@ -353,7 +436,7 @@ def run(message, attack="none", defense=False):
                 "reject_integrity",
             )
             return "[Rejected]", False
-        if defense and not replay_cache.accept(current_nonce, packet_session_id):
+        if defense and not bob.replay_cache.accept(current_nonce, packet_session_id):
             log(
                 "Bob",
                 "拒绝消息",
@@ -362,9 +445,7 @@ def run(message, attack="none", defense=False):
                 "reject_replay",
             )
             return "[Replay rejected]", True
-        received = decrypt(
-            current_packet["ciphertext"], bob_shared, current_nonce, errors="replace"
-        )
+        received = bob.decrypt_message(current_packet)
         log(
             "Bob", "接收消息", f"明文：{received}", packet_session_id, "receive_message"
         )
@@ -383,11 +464,17 @@ def run(message, attack="none", defense=False):
             communication_session_id,
             "replay_message",
         )
+        replayed_packet = evil.replay_message(communication_packet)
         transcript.append(
-            packet_event("Evil", "Bob", communication_packet, communication_session_id)
+            packet_event(
+                "Evil",
+                "Bob",
+                replayed_packet,
+                communication_session_id,
+            )
         )
         received, integrity = deliver(
-            communication_packet, transcript[-1].get("session_id", "")
+            replayed_packet, transcript[-1].get("session_id", "")
         )
 
     return {

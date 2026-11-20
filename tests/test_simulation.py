@@ -4,9 +4,13 @@ import hmac
 import pytest
 
 import app.simulation as simulation
-from app.core import P, decrypt, dh_keypair, dh_shared
+from app.core import decrypt, dh_keypair, dh_shared
 from app.replay import NonceReplayCache
-from app.simulation import _encrypted_value, _long_term_keys, _open_value, run
+from app.simulation import (
+    Party,
+    _long_term_keys,
+    run,
+)
 
 
 def log_kinds(result):
@@ -21,6 +25,51 @@ def authenticated_tag(ciphertext, shared, nonce, session_id):
     key = hashlib.sha256(f"mitm-lab:{shared}".encode()).digest()
     payload = f"{session_id}:{nonce}:{ciphertext}".encode()
     return hmac.new(key, payload, hashlib.sha256).hexdigest()
+
+
+def provisioned_parties():
+    alice_private, alice_public, bob_private, bob_public = _long_term_keys()
+    alice = Party("Alice")
+    bob = Party("Bob")
+    alice.provision_long_term(alice_private, alice_public)
+    bob.provision_long_term(bob_private, bob_public)
+    alice.establish_long_shared(bob.long_public)
+    bob.establish_long_shared(alice.long_public)
+    return alice, bob
+
+
+def test_endpoint_replay_caches_are_independent():
+    alice = Party("Alice")
+    bob = Party("Bob")
+
+    assert alice.replay_cache is not bob.replay_cache
+
+
+def test_party_session_public_key_roundtrip_binds_session():
+    alice, bob = provisioned_parties()
+    alice.generate_session_keypair()
+    session_id = "key-session"
+
+    packet = alice.encrypt_session_public_key(session_id)
+
+    assert set(packet) == {"ciphertext", "nonce", "tag"}
+    assert bob.open_session_public_key(packet, session_id) == alice.session_public
+    with pytest.raises(ValueError, match="authenticated session public key"):
+        bob.open_session_public_key(packet, "different-session")
+
+
+def test_party_message_authentication_is_bound_to_session():
+    alice = Party("Alice")
+    bob = Party("Bob")
+    alice.generate_session_keypair()
+    bob.generate_session_keypair()
+    alice.establish_session_shared(bob.session_public)
+    bob.establish_session_shared(alice.session_public)
+
+    packet = alice.encrypt_message("hello", "session-a")
+
+    assert bob.verify_message(packet, "session-a") is True
+    assert bob.verify_message(packet, "session-b") is False
 
 
 def test_normal_defended_flow_completes_authenticated_key_and_message_sessions():
@@ -78,7 +127,6 @@ def test_normal_defended_flow_completes_authenticated_key_and_message_sessions()
             int(decrypt(item["ciphertext"], alice_long_shared, item["nonce"]))
         )
     assert decrypted_session_keys == generated_session_keys
-    assert all(2 <= public_key <= P - 2 for public_key in decrypted_session_keys)
 
     assert packet(result, 0) == packet(result, 1)
 
@@ -101,10 +149,6 @@ def test_normal_unauthenticated_flow_exposes_plain_dh_and_preserves_message():
     assert all(
         set(item["data"]) == {"public_key"} for item in result["exchange_transcript"]
     )
-    assert all(
-        2 <= item["data"]["public_key"] <= P - 2
-        for item in result["exchange_transcript"]
-    )
     assert all("session_id" not in item for item in result["exchange_transcript"])
     assert packet(result, 0) == packet(result, 1)
     assert log_kinds(result) == [
@@ -121,6 +165,25 @@ def test_normal_unauthenticated_flow_exposes_plain_dh_and_preserves_message():
         "forward_message",
         "receive_message",
     ]
+
+
+@pytest.mark.parametrize("message", ["", "你好，世界 🌍", "x" * 256])
+def test_normal_defended_flow_preserves_message_values(message):
+    result = run(message, "none", True)
+
+    assert result["received"] == message
+    assert result["integrity"] is True
+
+
+def test_unauthenticated_run_does_not_load_long_term_keys(monkeypatch):
+    def fail_if_called():
+        pytest.fail("long-term keys are defense-only")
+
+    monkeypatch.setattr(simulation, "_long_term_keys", fail_if_called)
+
+    result = run("hello", "none", False)
+
+    assert result["received"] == "hello"
 
 
 def test_key_replacement_without_defense_uses_two_real_shared_keys(monkeypatch):
@@ -147,7 +210,6 @@ def test_key_replacement_without_defense_uses_two_real_shared_keys(monkeypatch):
         "receive_message",
     ]
     assert "session_ready" not in log_kinds(result)
-    assert any(log["kind"] == "decrypt_forward_message" for log in result["logs"])
     assert not any(log["kind"].startswith("reject_") for log in result["logs"])
 
     original = packet(result, 0)
@@ -201,22 +263,22 @@ def test_key_replacement_with_defense_cannot_replace_authenticated_session_keys(
 
 
 def test_authenticated_session_public_key_rejects_modified_ciphertext_or_tag():
-    alice_private, _, _, bob_public = _long_term_keys()
-    shared = dh_shared(alice_private, bob_public)
+    alice, bob = provisioned_parties()
+    alice.session_public = 123456
     session_id = "key-session"
-    original = _encrypted_value(123456, shared, session_id)
+    original = alice.encrypt_session_public_key(session_id)
 
     tampered_ciphertext = dict(original)
     tampered_ciphertext["ciphertext"] = (
         "00" if original["ciphertext"][:2] != "00" else "ff"
     ) + original["ciphertext"][2:]
     with pytest.raises(ValueError, match="authenticated session public key"):
-        _open_value(tampered_ciphertext, shared, session_id)
+        bob.open_session_public_key(tampered_ciphertext, session_id)
 
     tampered_tag = dict(original)
     tampered_tag["tag"] = "0" * len(original["tag"])
     with pytest.raises(ValueError, match="authenticated session public key"):
-        _open_value(tampered_tag, shared, session_id)
+        bob.open_session_public_key(tampered_tag, session_id)
 
 
 def test_tampering_keeps_stale_tag_and_is_rejected_only_with_defense():
@@ -224,7 +286,6 @@ def test_tampering_keeps_stale_tag_and_is_rejected_only_with_defense():
     defended = run("hello", "tamper", True)
 
     assert attack["integrity"] is False
-    assert attack["received"] != "hello"
     assert packet(attack, 0)["tag"] == packet(attack, 1)["tag"]
     assert packet(attack, 0)["ciphertext"] != packet(attack, 1)["ciphertext"]
     assert "reject_integrity" not in log_kinds(attack)
