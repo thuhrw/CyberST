@@ -2,18 +2,8 @@
 
 一个用于演示 Diffie-Hellman 密钥协商、中间人攻击（MITM）以及完整性和重放防御的交互式 Web 实验项目。
 
-项目通过 Alice、Evil、Bob 三个角色还原通信过程。前端以拓扑图和分步日志展示每个动作，后端则实际执行密钥生成、共享密钥计算、加密、解密、HMAC 校验和 nonce 重放检测，而不是只根据条件输出预设日志。
+项目通过 Alice、Evil、Bob 三个角色还原通信过程。前端以拓扑图和分步日志展示每个动作，后端则实际执行密钥生成、共享密钥计算、加密、解密、HMAC 校验和 nonce 重放检测。
 
-
-## 功能亮点
-
-- **真实的 DH 密钥协商**：使用自实现快速模幂计算生成公钥和共享密钥。
-- **真实的报文处理**：消息会根据共享密钥和 nonce 生成密文，并在接收端解密。
-- **完整性保护**：使用自实现 SHA-256 和 HMAC-SHA256 为密文、nonce、session ID 生成认证标签。
-- **可观测的 MITM**：未启用防御时，Evil 可以替换双方的 DH 公钥，并分别解密、重新加密和转发消息。
-- **会话级防御**：启用防御后，临时会话公钥通过长期共享密钥加密并认证，通信和密钥交换使用不同的 session。
-- **篡改和重放检测**：认证失败的报文会被拒绝；同一 session 中重复使用的 nonce 会被拒绝。
-- **分步交互界面**：点击“下一步”查看 Alice、Evil、Bob 的通信动作和每个 session 的日志。
 
 ## 快速开始
 
@@ -25,8 +15,6 @@
 ### 安装依赖
 
 ```bash
-git clone <repository-url>
-cd mitm-lab
 uv sync
 ```
 
@@ -41,31 +29,10 @@ uv run uvicorn app.main:app --reload
 ### 运行测试
 
 ```bash
-uv run pytest
+uv run pytest -q
 ```
 
 测试覆盖自实现密码算法与 Python 标准库/独立参考实现的结果一致性，以及完整的攻防流程。当前测试包括 DH、SHA-256、HMAC、密钥流加密、密钥替换、消息篡改、重放和 nonce session 隔离。
-
-## 实验流程
-
-### 未启用防御
-
-1. Alice 和 Bob 明文交换临时 DH public key。
-2. Evil 可以替换两侧 public key，建立两个不同的共享密钥。
-3. Alice 使用 Alice-Evil 共享密钥加密消息。
-4. Evil 解密消息，再使用 Evil-Bob 共享密钥重新加密并生成新的认证标签。
-5. Bob 使用 Evil-Bob 共享密钥解密，因此无法发现消息曾经过 Evil。
-
-在正常通信中，Alice 和 Bob 的 public key 不被替换，双方直接得到同一个共享密钥。
-
-### 启用防御
-
-1. Alice 和 Bob 使用模拟线下预置的长期 DH 密钥对，通过各自私钥和对方公钥得到长期共享密钥。
-2. 每次实验创建独立的 `key_exchange` session。
-3. 双方的临时 session public key 使用长期共享密钥加密，并用 HMAC 绑定密文、nonce 和 session ID。
-4. Evil 只能转发经过认证的密文，不能直接替换其中的 session public key。
-5. 密钥交换完成后创建新的 `communication` session，使用临时会话共享密钥保护消息。
-6. Bob 先验证 HMAC，再检查当前 session 的 nonce 是否已经使用过，最后才解密消息。
 
 ## 攻击场景
 
@@ -83,8 +50,8 @@ uv run pytest
 核心实现位于 [`app/core.py`](app/core.py)：
 
 - `modexp()`：快速模幂，用于 DH 公钥和共享密钥计算。
-- `sha256()`：本地实现的 SHA-256，测试中与 `hashlib.sha256` 对照。
-- `hmac_sha256()`：本地实现的 HMAC-SHA256，测试中与 `hmac.new` 对照。
+- `sha256()`：本地实现的 SHA-256。
+- `hmac_sha256()`：本地实现的 HMAC-SHA256。
 - `crypt()` / `decrypt()`：基于 SHA-256 密钥流和 XOR 的加密封装。
 - `tag()`：对 `session_id`、`nonce` 和密文计算认证标签。
 - `constant_time_equal()`：用于标签比较的常量时间比较函数。
@@ -135,7 +102,7 @@ curl -X POST http://127.0.0.1:8000/api/simulate \
 ## 项目结构
 
 ```text
-mitm-lab/
+./
 ├── app/
 │   ├── core.py          # DH、SHA-256、HMAC、加密和认证标签
 │   ├── replay.py        # 按 session 管理 nonce 的重放缓存
