@@ -184,7 +184,7 @@ def hmac_sha256(key: bytes, data: bytes) -> bytes:
 
 
 def _k(shared: int) -> bytes:
-    return sha256(f"mitm-lab:{shared}".encode())
+    return sha256(str(shared).encode())
 
 
 def crypt(text: str, shared: int, nonce: str) -> str:

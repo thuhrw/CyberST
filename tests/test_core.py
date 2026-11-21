@@ -20,7 +20,7 @@ from app.core import (
 
 def reference_stream_cipher(text: str, shared: int, nonce: str) -> str:
     """Independent reference for the lab's documented stream construction."""
-    key = hashlib.sha256(f"mitm-lab:{shared}".encode()).digest()
+    key = hashlib.sha256(str(shared).encode()).digest()
     encrypted = bytearray()
     for index, byte in enumerate(text.encode()):
         block = hashlib.sha256(
@@ -143,7 +143,7 @@ def test_wrong_key_does_not_recover_plaintext():
 
 def test_tag_matches_hmac_library_and_authenticates_every_field():
     ciphertext = crypt("hello", 12345, "abc")
-    key = hashlib.sha256(f"mitm-lab:{12345}".encode()).digest()
+    key = hashlib.sha256(str(12345).encode()).digest()
     expected = hmac.new(key, b"session-1:abc:" + ciphertext.encode(), hashlib.sha256)
     assert tag(ciphertext, 12345, "abc", "session-1") == expected.hexdigest()
     assert (

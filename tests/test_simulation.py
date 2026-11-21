@@ -22,7 +22,7 @@ def packet(result, index):
 
 
 def authenticated_tag(ciphertext, shared, nonce, session_id):
-    key = hashlib.sha256(f"mitm-lab:{shared}".encode()).digest()
+    key = hashlib.sha256(str(shared).encode()).digest()
     payload = f"{session_id}:{nonce}:{ciphertext}".encode()
     return hmac.new(key, payload, hashlib.sha256).hexdigest()
 

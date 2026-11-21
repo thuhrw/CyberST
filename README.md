@@ -56,6 +56,8 @@ uv run pytest -q
 - `tag()`：对 `session_id`、`nonce` 和密文计算认证标签。
 - `constant_time_equal()`：用于标签比较的常量时间比较函数。
 
+DH 双方将相同的共享整数转换为十进制字符串并使用 UTF-8 编码，再计算 SHA-256 得到共同的字节密钥。
+
 
 ## HTTP API
 
